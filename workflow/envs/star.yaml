@@ -1,0 +1,10 @@
+name: star
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - star=2.7.11b
+  - samtools
+  - python=3.11
+  - pandas
+  - scanpy

@@ -1,0 +1,106 @@
+# workflow/Snakefile
+import pandas as pd
+configfile: "config/config.yaml"
+
+samples = pd.read_csv("config/samples.csv").set_index("sample_id", drop=False)
+SAMPLES = samples.index.tolist()
+
+rule all:
+    input:
+        expand("results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
+               sample=SAMPLES),
+        expand("results/starsolo/{sample}/qc_summary.tsv",
+               sample=SAMPLES),
+
+rule star_index:
+    input:
+        fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        gff   = lambda w: samples.loc[w.sample, "annotation_gff"],
+    output:
+        directory("results/star_index/{sample}"),
+        done = "results/star_index/{sample}/.done",
+    log: "logs/star_index/{sample}.log"
+    benchmark: "benchmarks/star_index/{sample}.tsv"
+    threads: 16
+    resources:
+        mem_mb = 64000,
+        runtime = 240,
+    conda: "envs/star.yaml"
+    shell:
+        """
+        mkdir -p {output[0]}
+        STAR --runMode genomeGenerate \
+             --runThreadN {threads} \
+             --genomeDir {output[0]} \
+             --genomeFastaFiles {input.fasta} \
+             --sjdbGTFfile {input.gff} \
+             --sjdbGTFtagExonParentTranscript Parent \
+             --sjdbOverhang 99 \
+             --genomeSAindexNbases 13 \
+             > {log} 2>&1
+        touch {output.done}
+        """
+
+rule starsolo_align:
+    input:
+        index = "results/star_index/{sample}/.done",
+        r1    = lambda w: samples.loc[w.sample, "scrna_r1"],
+        r3    = lambda w: samples.loc[w.sample, "scrna_r3"],  # add this column
+        whitelist = config["whitelist_5p_v1"],
+    output:
+        matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
+        bam    = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
+        summary = "results/starsolo/{sample}/Solo.out/Gene/Summary.csv",
+        done   = "results/starsolo/{sample}/.done",
+    log: "logs/starsolo/{sample}.log"
+    benchmark: "benchmarks/starsolo/{sample}.tsv"
+    threads: 16
+    resources:
+        mem_mb = 80000,
+        runtime = 480,
+    conda: "envs/star.yaml"
+    params:
+        index_dir = lambda w: f"results/star_index/{w.sample}",
+        out_prefix = lambda w: f"results/starsolo/{w.sample}/",
+    shell:
+        """
+        mkdir -p {params.out_prefix}
+        STAR --runMode alignReads \
+             --runThreadN {threads} \
+             --genomeDir {params.index_dir} \
+             --readFilesIn {input.r3} {input.r1} \
+             --readFilesCommand zcat \
+             --soloType CB_UMI_Simple \
+             --soloCBwhitelist {input.whitelist} \
+             --soloCBstart 1 --soloCBlen 16 \
+             --soloUMIstart 17 --soloUMIlen 10 \
+             --soloFeatures Gene GeneFull \
+             --soloUMIfiltering MultiGeneUMI_CR \
+             --soloUMIdedup 1MM_CR \
+             --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+             --soloCellFilter None \
+             --soloBarcodeReadLength 0 \
+             --outSAMtype BAM SortedByCoordinate \
+             --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
+             --outFileNamePrefix {params.out_prefix} \
+             > {log} 2>&1
+        touch {output.done}
+        """
+
+rule starsolo_qc:
+    input:
+        summary = "results/starsolo/{sample}/Solo.out/Gene/Summary.csv",
+        bam     = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
+    output:
+        tsv = "results/starsolo/{sample}/qc_summary.tsv",
+    log: "logs/starsolo_qc/{sample}.log"
+    conda: "envs/star.yaml"
+    shell:
+        """
+        python workflow/scripts/starsolo_qc.py \
+            --sample {wildcards.sample} \
+            --summary {input.summary} \
+            --bam {input.bam} \
+            --out {output.tsv} \
+            > {log} 2>&1
+        """

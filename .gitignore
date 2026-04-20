@@ -1,0 +1,44 @@
+cat > .gitignore <<'EOF'
+# Snakemake
+.snakemake/
+results/
+logs/
+benchmarks/
+*.done
+
+# Conda
+.conda/
+envs/*/
+!workflow/envs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.egg-info/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Large data — never commit
+*.fastq.gz
+*.fasta
+*.fa
+*.bam
+*.bai
+*.mtx
+*.h5
+*.gff3
+*.gtf
+
+# But allow small example/test data if you ever add it
+!tests/data/*.csv
+
+# Local config overrides
+config/local.yaml
+EOF
