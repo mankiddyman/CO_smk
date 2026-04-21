@@ -147,3 +147,40 @@ exonic match.
 
 **Reconsider if:** cell calling produces obviously wrong cell counts, or
 downstream SNP calling shows coverage too sparse, trace it to counting gaps.
+
+
+---
+
+## 2026-04-21 — Accept GeneFull ~32% vs CR's ~50%, use BAM-driven downstream
+
+**Decision:** Use STARsolo with GFF3 + `--sjdbGTFtagExonParentTranscript Parent`.
+Primary counting mode is `GeneFull` (exonic + intronic). Accept ~15pp gap
+on gene counting vs Cell Ranger's output on the same data.
+
+**Run-by-run empirical record:**
+
+| Config | Gene % | GeneFull % | Genome map % |
+|---|---|---|---|
+| Cell Ranger 9.0.1 (`SC5P-R2 --include-introns`) | 46.6 | 49.7 | 64.3 |
+| STARsolo + GFF3 + `--Parent` | 1.0 | 32.1 | 64.3 |
+| STARsolo + gffread GTF (no `--Parent`) | 1.0 | 1.8 | 64.3 |
+| STARsolo + GFF3 + `--Parent` (reverted) | 1.0 | 32.1 | 64.3 |
+
+**Reasoning:**
+- Genome mapping rate is identical across all configs (64.3%), meaning
+  the aligner is doing the same work. The gap is purely in how STARsolo
+  attributes reads to genes vs how Cell Ranger does.
+- Gffread-converted GTF made counting worse, not better. The `Parent`
+  flag is doing real work in STARsolo's internal gene model for this
+  annotation style that gffread's output doesn't preserve.
+- For crossover inference, the BAM (CB-tagged, 100% of first 100k
+  checked) is the actual input to downstream SNP calling. The raw count
+  matrix is used only for cell calling (emptyDrops), where 32% gene
+  assignment is sufficient.
+- Perfect match to Cell Ranger would be nice but not worth chasing. Our
+  pipeline is reproducible, parameterizable, Snakemake-native, and the
+  alignment is demonstrably correct.
+
+**Reconsider if:** emptyDrops on the raw matrix produces suspiciously
+few or many cells, or if downstream per-cell SNP depth is sparse.
+Either could trace back to counting gaps we're accepting here.
