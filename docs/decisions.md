@@ -184,3 +184,51 @@ on gene counting vs Cell Ranger's output on the same data.
 **Reconsider if:** emptyDrops on the raw matrix produces suspiciously
 few or many cells, or if downstream per-cell SNP depth is sparse.
 Either could trace back to counting gaps we're accepting here.
+
+---
+
+## 2026-04-21 — GTF attribute order matters for STARsolo gene counting
+
+**Decision:** `gff_to_gtf` rule pipes gffread output through awk to reorder
+attributes so `gene_id` precedes `transcript_id` in column 9.
+
+**Reasoning:**
+- STARsolo 2.7.11b silently collapsed all 20,164 Helixer genes into a
+  single `MissingGeneID` bucket in features.tsv when column 9 was
+  `transcript_id "..."; gene_id "..."` (gffread default).
+- Cell Ranger's `mkref` produces `gene_id "..."; transcript_id "...";`
+  and works correctly with STAR.
+- Same coordinates, same IDs, same feature counts, only attribute order
+  differs. Undocumented STAR parser requirement.
+
+**Lesson for future debugging:** inspect `geneInfo.tab` in the STAR index
+and `features.tsv` in the STARsolo output after any annotation change.
+Summary.csv percentages can look fine while the matrix structure is broken.
+
+---
+
+## 2026-04-21 — STARsolo strand for 10x 5' chemistry is Reverse
+
+**Decision:** `--soloStrand Reverse` in `starsolo_align`.
+
+**Reasoning:**
+- 10x 5' chemistry uses template-switching at the 5' cap; cDNA read (R3)
+  aligns antisense to the transcript.
+- Empirical test on 1M-read subset, same index, varying `--soloStrand`:
+
+  | Strand | Gene | GeneFull |
+  |---|---|---|
+  | Forward (default) | 0.9% | 1.6% |
+  | Reverse | 41.0% | 45.6% |
+  | Unstranded | 41.8% | 46.8% |
+
+- Unstranded marginally higher but double-counts antisense overlaps.
+  Reverse preserves real biological stranding for downstream SNP work.
+- Cell Ranger handles this via internal chemistry auto-detect; STARsolo
+  requires explicit config. Manual is explicit for 10x 3' but ambiguous
+  for 5'.
+
+**Validation:** GeneFull mapping matches Cell Ranger's 49.7% within ~4pp.
+
+**Pair with:** GTF attribute-order fix above — both required simultaneously.
+Either alone produced "low but plausible" numbers that hid structural failure.
