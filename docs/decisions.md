@@ -73,3 +73,56 @@ check.
 
 **cDNA is on R3, not R2.** Cell Ranger's "R2-only" naming is internal
 convention; the actual cDNA file fed to STAR is R3.
+
+
+
+---
+
+## 2026-04-21 — Convert GFF3 to GTF before STAR indexing
+
+**Decision:** Add a `gff_to_gtf` rule (gffread) upstream of `star_index`.
+`star_index` now consumes GTF, not GFF3.
+
+**Reasoning:**
+- First STARsolo run on hap1 produced 1.0% exonic gene mapping
+  (`Reads Mapped to Gene: Unique Gene = 0.00998`) vs Cell Ranger's 46.6%
+  on the same data.
+- Genome mapping was identical (64.3%) and barcode parsing was identical
+  (89.2%), so the aligner was doing the same work — the failure was
+  exon→transcript→gene linkage at counting time.
+- STAR's `--sjdbGTFtagExonParentTranscript Parent` flag handles splice
+  junction definition from GFF3, but gene/transcript assignment for
+  counting expects GTF-style `transcript_id` / `gene_id` attributes.
+  Helixer GFF3 uses `ID` / `Parent` hierarchy (`exon → mRNA → gene`)
+  which STAR did not resolve for counting.
+- `gffread -T` converts the hierarchy to flat GTF with explicit
+  `transcript_id` and `gene_id` attributes on every exon. Standard fix.
+
+**Implementation notes:**
+- `gff_to_gtf` writes to `results/annotation/{sample}.gtf` — one GTF
+  per sample × haplotype combination. Cheap (<1 min) so no reason to
+  cache outside the pipeline.
+- `--sjdbGTFtagExonParentTranscript Parent` removed from STAR index
+  call; the GTF default behavior is correct.
+- Added `gffread` to `workflow/envs/star.yaml`.
+
+**Reconsider if:** future annotation sources produce GTF directly
+(skip the conversion) or produce GFF3 that fails gffread validation
+(would need upstream cleaning).
+
+---
+
+## 2026-04-21 — Conda env hygiene: one purpose per env
+
+**Decision:** `star.yaml` contains only alignment/indexing tools
+(star, samtools, gffread). Analysis libraries (scanpy, pandas) live
+in `scanalysis.yaml`. The `star_index` rule was accidentally pointed
+at `scanalysis.yaml` and happened to work — fixed.
+
+**Reasoning:** Original attempt combined star + scanpy in one env,
+which was unsolvable via conda (python-igraph → glpk → libdeflate
+conflict with htslib pinned by STAR). Splitting by purpose keeps
+each solve small and each env's dependency surface narrow.
+
+**Reconsider if:** two rules of different purposes need to share
+state via the same env (unlikely in a reproducibility-focused pipeline).
