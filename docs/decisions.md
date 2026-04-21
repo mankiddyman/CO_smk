@@ -126,3 +126,24 @@ each solve small and each env's dependency surface narrow.
 
 **Reconsider if:** two rules of different purposes need to share
 state via the same env (unlikely in a reproducibility-focused pipeline).
+
+
+
+---
+
+## 2026-04-21 — Using GFF3 directly with GeneFull counting, accepting gap vs CR
+
+**Decision:** Revert to GFF3 input with `--sjdbGTFtagExonParentTranscript Parent`.
+Primary count matrix is `GeneFull` (exonic + intronic). Don't chase CR's 47%
+exonic match.
+
+**Reasoning:**
+- GFF3 → GTF via gffread actively made counting worse (GeneFull dropped
+  32% → 1.8%, Gene stayed at 1%). Added flag we removed was doing useful work.
+- CR's GTF structurally identical to ours; not a GTF format issue.
+- For crossover inference, we need BAM with CB tags (working) + good-enough
+  count matrix for emptyDrops cell calling. 32% GeneFull is sufficient.
+- Don't need to match CR's exonic rate exactly; downstream uses BAM alignments.
+
+**Reconsider if:** cell calling produces obviously wrong cell counts, or
+downstream SNP calling shows coverage too sparse, trace it to counting gaps.
