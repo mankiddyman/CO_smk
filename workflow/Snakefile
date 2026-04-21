@@ -12,10 +12,30 @@ rule all:
         expand("results/starsolo/{sample}/qc_summary.tsv",
                sample=SAMPLES),
 
+
+
+
+rule gff_to_gtf:
+    input:
+        gff = lambda w: samples.loc[w.sample, "annotation_gff"],
+    output:
+        gtf = "results/annotation/{sample}.gtf",
+    log: "logs/gff_to_gtf/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 4000,
+        runtime = 30,
+    conda: "envs/star.yaml"
+    shell:
+        """
+        mkdir -p results/annotation
+        gffread {input.gff} -T -o {output.gtf} 2> {log}
+        """
+
 rule star_index:
     input:
         fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
-        gff   = lambda w: samples.loc[w.sample, "annotation_gff"],
+        gtf   = "results/annotation/{sample}.gtf",
     output:
         directory("results/star_index/{sample}"),
         done = "results/star_index/{sample}/.done",
@@ -33,13 +53,14 @@ rule star_index:
              --runThreadN {threads} \
              --genomeDir {output[0]} \
              --genomeFastaFiles {input.fasta} \
-             --sjdbGTFfile {input.gff} \
-             --sjdbGTFtagExonParentTranscript Parent \
+             --sjdbGTFfile {input.gtf} \
              --sjdbOverhang 99 \
              --genomeSAindexNbases 13 \
              > {log} 2>&1
         touch {output.done}
         """
+
+
 
 rule starsolo_align:
     input:
