@@ -232,3 +232,79 @@ Summary.csv percentages can look fine while the matrix structure is broken.
 
 **Pair with:** GTF attribute-order fix above — both required simultaneously.
 Either alone produced "low but plausible" numbers that hid structural failure.
+
+
+---
+
+## 2026-04-22 — Cell calling: emptyDrops with lower=300 for plant pollen
+
+**Decision:** Use `emptyDrops(lower=300, FDR<=0.001)` as primary cell call,
+yielding ~7k cells. Output multiple thresholds for downstream comparison.
+
+**Reasoning:**
+- Cuscuta epithymum pollen scRNA shows minimal transcriptional complexity:
+  top 20 genes are nearly identical between ambient pool and high-UMI
+  cells, meaning emptyDrops cannot distinguish cells from ambient by
+  expression profile. Effectively, `lower` IS the threshold.
+- Empirical cell counts at varying thresholds:
+
+  | lower | n_cells | median UMI | comment |
+  |---|---|---|---|
+  | 100 | 60,413 | 268 | far too permissive |
+  | 300 | 6,874 | 451 | matches expected ~10k loaded → ~5-6k recovered |
+  | 500 | 2,353 | 663 | conservative |
+  | 1000 | 329 | 1,382 | far too restrictive |
+
+- Library prep targeted ~10k loaded cells; expected recovery ~5-7k.
+  lower=300 brackets this expectation.
+- Downstream filters (per-marker depth, per-chromosome switch rate)
+  will clean residual ambient/doublet contamination. Cell calling at
+  this stage is a coarse first pass.
+- For pollen specifically, ambient contamination IS a haplotype
+  mixture (50/50 at each marker). Stage 3 switch-rate filtering
+  catches contaminated cells via excess apparent heterozygosity.
+
+**Reconsider if:** downstream switch-rate filtering throws out >50% of
+called cells, OR if marker coverage per cell is too sparse — then
+lower=300 may need adjusting up or down based on what the SNP stage
+needs.
+
+
+
+---
+
+## 2026-04-24 — Marker filter thresholds
+
+**Decision:** Filter HiFi raw VCF with:
+- Biallelic SNPs only
+- Heterozygous genotype only
+- DP: 10-80
+- QUAL: ≥30
+- ALT allele ratio: 0.3-0.7
+
+Yields ~4.3M markers from 6.8M het biallelic SNPs (63% retention).
+
+**Reasoning:**
+- Diagnostic histograms on raw VCF showed healthy library: modal DP~40x,
+  very high QUAL (median 222), ALT ratio centered near 0.5 but with
+  reference-bias shoulder (median 0.39, not 0.5).
+- DP>80 excludes repeat-region false hets (pileups from paralogs).
+- DP<10 excludes low-coverage noise where allele ratio is unreliable.
+- QUAL≥30 is a safety net; filter is not discriminating since most
+  variants are QUAL>200.
+- Ratio 0.3-0.7 retains the main het distribution including left-shifted
+  shoulder from reference bias. Tightening to 0.4-0.6 was considered
+  but would cut the left side of the real het distribution because of
+  the asymmetric reference-bias shift.
+
+**Note on marker count:**
+- 4.3M markers is far more than needed for CO resolution (~60k would
+  suffice for 10 kb spacing on 600 Mb genome).
+- Kept the full set at this stage; downstream can subset (e.g. to
+  markers in expressed genes) when Stage 2 pileup performance requires.
+
+**Reconsider if:**
+- Stage 2 per-cell pileup is too slow → subset to expressed genes or
+  space markers more widely.
+- CO calls look overclustered → reference bias may be misleading
+  per-cell calls; tighten to 0.4-0.6 and re-examine.

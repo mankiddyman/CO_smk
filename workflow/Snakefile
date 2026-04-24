@@ -1,16 +1,21 @@
 # workflow/Snakefile
 import pandas as pd
+import os
 configfile: "config/config.yaml"
 
 samples = pd.read_csv("config/samples.csv").set_index("sample_id", drop=False)
 SAMPLES = samples.index.tolist()
+marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
+# ...
+
 
 rule all:
     input:
-        expand("results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
-               sample=SAMPLES),
-        expand("results/starsolo/{sample}/qc_summary.tsv",
-               sample=SAMPLES),
+        expand("results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx", sample=SAMPLES),
+        expand("results/cells/{sample}/qc_summary.tsv", sample=SAMPLES),
+        expand("results/markers/{sample}/markers.tsv", sample=marker_samples),
+        expand("results/cells/{sample}/knee_plot.pdf",sample=SAMPLES),
+        expand("results/markers/{sample}/diagnostic_histograms.pdf", sample=marker_samples),
 
 rule gff_to_gtf:
     input:
@@ -126,4 +131,210 @@ rule starsolo_qc:
             --bam {input.bam} \
             --out {output.tsv} \
             > {log} 2>&1
+        """
+
+
+rule cell_calling:
+    input:
+        matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
+    output:
+        called = "results/cells/{sample}/barcodes_called.tsv",
+        comparison = "results/cells/{sample}/threshold_comparison.tsv",
+        stats = "results/cells/{sample}/barcode_stats.tsv",
+        qc = "results/cells/{sample}/qc_summary.tsv",
+        plot = "results/cells/{sample}/knee_plot.pdf",
+    log: "logs/cell_calling/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 32000,
+        runtime = 60,
+    conda: "envs/cell_calling.yaml"
+    params:
+        matrix_dir = lambda w: f"results/starsolo/{w.sample}/Solo.out/GeneFull/raw",
+        out_dir = lambda w: f"results/cells/{w.sample}",
+        default_lower = 300,
+    shell:
+        """
+        Rscript workflow/scripts/cell_calling.R \
+            --matrix_dir {params.matrix_dir} \
+            --out_dir {params.out_dir} \
+            --sample {wildcards.sample} \
+            --default_lower {params.default_lower} \
+            --fdr 0.001 \
+            --niters 10000 \
+            > {log} 2>&1
+        """
+
+
+
+
+def get_chromosomes(sample_id):
+    """Read chromosome names from the FASTA index. Returns empty list if .fai doesn't exist yet."""
+    fasta = samples.loc[sample_id, "assembly_fasta"]
+    fai = fasta + ".fai"
+    if not os.path.exists(fai):
+        return []
+    with open(fai) as f:
+        return [line.split("\t")[0] for line in f if line.strip()]
+
+
+rule hifi_align:
+    """Align HiFi reads to the assembly. Run once per sample."""
+    input:
+        fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        hifi  = lambda w: samples.loc[w.sample, "hifi_reads"],
+    output:
+        bam = "results/markers/{sample}/hifi.bam",
+        bai = "results/markers/{sample}/hifi.bam.bai",
+    log: "logs/hifi_align/{sample}.log"
+    threads: 16
+    resources:
+        mem_mb = 64000,
+        runtime = 180,  # 3h — was 28min actual for hap1
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        if [ ! -f {input.fasta}.fai ]; then
+            samtools faidx {input.fasta} 2>> {log}
+        fi
+        minimap2 -t {threads} -ax map-hifi {input.fasta} {input.hifi} 2>> {log} | \
+            samtools sort -@ 4 -o {output.bam} - 2>> {log}
+        samtools index {output.bam} 2>> {log}
+        """
+
+
+rule hifi_variants_per_chrom:
+    """Call variants on one chromosome/scaffold. Parallelizable across {chrom}."""
+    input:
+        fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        fai   = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+        bam   = "results/markers/{sample}/hifi.bam",
+        bai   = "results/markers/{sample}/hifi.bam.bai",
+    output:
+        vcf = "results/markers/{sample}/by_chrom/{chrom}.vcf.gz",
+        tbi = "results/markers/{sample}/by_chrom/{chrom}.vcf.gz.tbi",
+    log: "logs/hifi_variants_per_chrom/{sample}.{chrom}.log"
+    threads: 2
+    resources:
+        mem_mb = 8000,
+        runtime = 600,  # 10h ceiling per chrom; largest was ~8h serial
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        mkdir -p results/markers/{wildcards.sample}/by_chrom
+        bcftools mpileup -f {input.fasta} -q 20 -Q 20 -a AD,DP \
+            -r {wildcards.chrom} {input.bam} 2>> {log} | \
+        bcftools call -m -v -Oz -o {output.vcf} 2>> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+        """
+
+
+rule hifi_variants_merge:
+    """Concatenate per-chromosome VCFs into the final raw VCF."""
+    input:
+        vcfs = lambda w: expand(
+            "results/markers/{sample}/by_chrom/{chrom}.vcf.gz",
+            sample=w.sample,
+            chrom=get_chromosomes(w.sample),
+        ),
+    output:
+        vcf = "results/markers/{sample}/hifi_raw.vcf.gz",
+        tbi = "results/markers/{sample}/hifi_raw.vcf.gz.tbi",
+    log: "logs/hifi_variants_merge/{sample}.log"
+    threads: 2
+    resources:
+        mem_mb = 4000,
+        runtime = 30,
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        bcftools concat -Oz -o {output.vcf} {input.vcfs} 2>> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+        """
+
+
+rule marker_diagnostics:
+    input:
+        vcf = "results/markers/{sample}/hifi_raw.vcf.gz",
+    output:
+        stats_tsv = "results/markers/{sample}/raw_variant_stats.tsv",
+        histograms = "results/markers/{sample}/diagnostic_histograms.pdf",
+        summary = "results/markers/{sample}/diagnostics_summary.txt",
+    log: "logs/marker_diagnostics/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 32000,
+        runtime = 60,
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        Rscript workflow/scripts/marker_diagnostics.R \
+            --vcf {input.vcf} \
+            --out_stats {output.stats_tsv} \
+            --out_pdf {output.histograms} \
+            --out_summary {output.summary} \
+            > {log} 2>&1
+        """
+
+
+rule generate_dag:
+    output:
+        svg = ".github/assets/rulegraph.svg",
+        png = ".github/assets/rulegraph.png",
+    log: "logs/generate_dag.log"
+    shell:
+        """
+        mkdir -p .github/assets
+        snakemake --dag 2> {log} | dot -Tsvg > {output.svg} 2>> {log}
+        snakemake --dag 2>> {log} | dot -Tpng > {output.png} 2>> {log}
+        """
+
+rule filter_markers:
+    """Filter raw HiFi VCF to high-confidence heterozygous SNPs."""
+    input:
+        vcf = "results/markers/{sample}/hifi_raw.vcf.gz",
+    output:
+        vcf = "results/markers/{sample}/markers.vcf.gz",
+        tbi = "results/markers/{sample}/markers.vcf.gz.tbi",
+        tsv = "results/markers/{sample}/markers.tsv",
+        summary = "results/markers/{sample}/filter_summary.txt",
+    log: "logs/filter_markers/{sample}.log"
+    threads: 2
+    resources:
+        mem_mb = 8000,
+        runtime = 60,
+    conda: "envs/markers.yaml"
+    params:
+        min_dp = config["marker_filters"]["min_dp"],
+        max_dp = config["marker_filters"]["max_dp"],
+        min_qual = config["marker_filters"]["min_qual"],
+        min_ratio = config["marker_filters"]["min_alt_ratio"],
+        max_ratio = config["marker_filters"]["max_alt_ratio"],
+    shell:
+        r"""
+        # Filter: biallelic SNPs, het, DP range, QUAL, allele ratio
+        # bcftools expression: INFO and FORMAT fields accessed by name
+        bcftools view \
+            -m2 -M2 -v snps \
+            -g het \
+            -e 'QUAL < {params.min_qual} || FMT/DP < {params.min_dp} || FMT/DP > {params.max_dp} || (FMT/AD[0:1] / FMT/DP) < {params.min_ratio} || (FMT/AD[0:1] / FMT/DP) > {params.max_ratio}' \
+            -Oz -o {output.vcf} {input.vcf} 2> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+
+        # Export to simple TSV: chrom, pos, ref, alt
+        bcftools query \
+            -f '%CHROM\t%POS\t%REF\t%ALT\n' \
+            {output.vcf} > {output.tsv} 2>> {log}
+
+        # Summary
+        n_raw=$(bcftools view -H {input.vcf} | wc -l)
+        n_filtered=$(wc -l < {output.tsv})
+        echo "Raw variants: $n_raw"        > {output.summary}
+        echo "Markers after filter: $n_filtered" >> {output.summary}
+        echo "Retention: $(echo "scale=4; $n_filtered / $n_raw" | bc)" >> {output.summary}
+        echo "" >> {output.summary}
+        echo "Per-chromosome marker counts:" >> {output.summary}
+        cut -f1 {output.tsv} | sort | uniq -c >> {output.summary}
+        echo "" >> {output.summary}
+        echo "Filter params: min_dp={params.min_dp}, max_dp={params.max_dp}, min_qual={params.min_qual}, ratio=[{params.min_ratio},{params.max_ratio}]" >> {output.summary}
         """

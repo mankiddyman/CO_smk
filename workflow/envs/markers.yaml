@@ -1,0 +1,13 @@
+name: markers
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - minimap2=2.28
+  - samtools=1.21
+  - bcftools=1.21
+  - htslib
+  - r-base=4.3
+  - bioconductor-variantannotation
+  - r-optparse
