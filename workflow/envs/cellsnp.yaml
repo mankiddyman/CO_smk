@@ -6,3 +6,5 @@ channels:
 dependencies:
   - cellsnp-lite=1.2.3
   - samtools
+  - python
+  - scipy

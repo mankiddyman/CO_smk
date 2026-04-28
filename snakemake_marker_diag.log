@@ -1,0 +1,29 @@
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job stats:
+job                   count
+------------------  -------
+marker_diagnostics        1
+total                     1
+
+Select jobs to execute...
+Execute 1 jobs...
+
+[Fri Apr 24 11:38:25 2026]
+localrule marker_diagnostics:
+    input: results/markers/6303_B_hap1/hifi_raw.vcf.gz
+    output: results/markers/6303_B_hap1/raw_variant_stats.tsv, results/markers/6303_B_hap1/diagnostic_histograms.pdf, results/markers/6303_B_hap1/diagnostics_summary.txt
+    log: logs/marker_diagnostics/6303_B_hap1.log
+    jobid: 0
+    reason: Missing output files: results/markers/6303_B_hap1/diagnostic_histograms.pdf
+    wildcards: sample=6303_B_hap1
+    resources: tmpdir=/scratch, runtime=60, mem_mb=32000, mem=32 GB, mem_mib=30518
+Activating conda environment: .snakemake/conda/7c26141b5b7c92ef7742182008d09912_
+[Fri Apr 24 11:40:47 2026]
+Finished jobid: 0 (Rule: marker_diagnostics)
+1 of 1 steps (100%) done
+Complete log(s): /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/log/2026-04-24T113822.062933.snakemake.log

@@ -393,3 +393,64 @@ rule cell_snp_counting:
             --gzip \
             > {log} 2>&1
         """
+
+
+
+
+rule cellsnp_to_per_cell:
+    """Convert cellsnp-lite sparse matrices to per-cell TSVs in Meng's input format."""
+    input:
+        dp = "results/snps/{sample}/cellSNP.tag.DP.mtx",
+        ad = "results/snps/{sample}/cellSNP.tag.AD.mtx",
+        snp_samples = "results/snps/{sample}/cellSNP.samples.tsv",
+        sites = "results/snps/{sample}/cellSNP.base.vcf.gz",
+        fai = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+    output:
+        chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+        summary = "results/cell_data/{sample}/conversion_summary.txt",
+    log: "logs/cellsnp_to_per_cell/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 16000,
+        runtime = 30,
+    conda: "envs/cellsnp.yaml"
+    params:
+        cellsnp_dir = lambda w: f"results/snps/{w.sample}",
+        out_dir = lambda w: f"results/cell_data/{w.sample}",
+        min_markers = 50,
+    shell:
+        """
+        python workflow/scripts/cellsnp_to_per_cell.py \
+            --cellsnp_dir {params.cellsnp_dir} \
+            --fai {input.fai} \
+            --out_dir {params.out_dir} \
+            --min_markers {params.min_markers} \
+            > {log} 2>&1
+        """
+
+
+
+rule switch_diagnostics:
+    """Per-cell switch rate diagnostics for QC threshold setting."""
+    input:
+        chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+        summary = "results/cell_data/{sample}/conversion_summary.txt",
+    output:
+        switches = "results/cell_qc/{sample}/switches.tsv",
+        plot = "results/cell_qc/{sample}/switch_diagnostics.pdf",
+    log: "logs/switch_diagnostics/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 16000,
+        runtime = 60,
+    conda: "envs/cell_qc.yaml"
+    params:
+        cell_data_dir = lambda w: f"results/cell_data/{w.sample}",
+        out_dir = lambda w: f"results/cell_qc/{w.sample}",
+    shell:
+        """
+        Rscript workflow/scripts/switch_diagnostics.R \
+            --cell_data_dir {params.cell_data_dir} \
+            --out_dir {params.out_dir} \
+            > {log} 2>&1
+        """

@@ -1,0 +1,5 @@
+Support for alternative conda frontends has been deprecated in favor of simpler support and code base. This should not cause issues since current conda releases rely on fast solving via libmamba. Ignoring the alternative conda frontend setting (mamba).
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Nothing to be done (all requested files are present and up to date).

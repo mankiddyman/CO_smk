@@ -1,0 +1,7 @@
+method	n_cells	median_umi
+knee	60170	269
+inflection	83803	231
+ed_lower100	60413	268
+ed_lower300	NA	NA
+ed_lower500	2353	663
+ed_lower1000	329	1382

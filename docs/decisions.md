@@ -401,3 +401,31 @@ not per-cell BAM demultiplexing) for per-cell allele counts.
 
 **Side fix:** `starsolo_align` rule now also outputs `Aligned.sortedByCoord.out.bam.bai`
 (samtools index after STAR), since cellsnp-lite needs an indexed BAM.
+
+
+
+---
+
+## 2026-04-28 — Stage 3a: cellsnp MTX → per-cell TSVs
+
+**Decision:** Convert cellsnp-lite output (sparse MTX matrices) to one TSV
+per cell, in the format expected by Meng's `hapCO_identification.R`:
+`chrom, pos, ref, ref_count, alt, alt_count`.
+
+**Reasoning:**
+- Adopting Meng's CO calling algorithm requires per-cell tables. Bridging
+  sparse-matrix → per-cell-files at this point is cleaner than rewriting
+  the algorithm to consume MTX directly.
+- ~6,874 files of ~1k rows each (~25 KB each) is fine for filesystem.
+- Skipping cells with <50 markers — none filtered on hap1 (min cell had 463).
+
+**Result on hap1:**
+- 6,874 cells written, all retained.
+- Median 1,027 markers per cell, max 6,156.
+- 293 MB total disk for per-cell TSVs.
+- Validated: 3 random (cell, marker) entries all match raw cellsnp output exactly.
+
+**Side outputs:** `chrom_map.tsv` (internal_id ↔ scaffold name ↔ size).
+This map is the bridge from Meng's integer-numbered chromosome convention
+to our scaffold names. Per-cell files keep scaffold names directly;
+chromsome-size lookups in downstream scripts go through the map.

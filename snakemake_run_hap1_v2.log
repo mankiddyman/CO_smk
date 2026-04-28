@@ -1,0 +1,71 @@
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Creating conda environment workflow/envs/star.yaml...
+Downloading and installing remote packages.
+Cleaning up conda package tarballs.
+Environment for /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/workflow/envs/star.yaml created (location: .snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_)
+Using shell: /usr/bin/bash
+Provided cores: 16
+Rules claiming more threads will be scaled down.
+Job stats:
+job               count
+--------------  -------
+gff_to_gtf            1
+star_index            1
+starsolo_align        1
+total                 3
+
+Select jobs to execute...
+Execute 1 jobs...
+
+[Tue Apr 21 13:14:22 2026]
+localrule gff_to_gtf:
+    input: /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/Helixer/hap1/annotations/hap1_helixer_merged.gff3
+    output: results/annotation/6303_B_hap1.gtf
+    log: logs/gff_to_gtf/6303_B_hap1.log
+    jobid: 2
+    reason: Missing output files: results/annotation/6303_B_hap1.gtf
+    wildcards: sample=6303_B_hap1
+    resources: tmpdir=/scratch, runtime=30, mem_mb=4000, mem=4 GB, mem_mib=3815
+Activating conda environment: .snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_
+[Tue Apr 21 13:14:23 2026]
+Finished jobid: 2 (Rule: gff_to_gtf)
+1 of 3 steps (33%) done
+Select jobs to execute...
+Execute 1 jobs...
+
+[Tue Apr 21 13:14:23 2026]
+localrule star_index:
+    input: /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta, results/annotation/6303_B_hap1.gtf
+    output: results/star_index/6303_B_hap1, results/star_index/6303_B_hap1/.done
+    log: logs/star_index/6303_B_hap1.log
+    jobid: 1
+    benchmark: benchmarks/star_index/6303_B_hap1.tsv
+    reason: Missing output files: results/star_index/6303_B_hap1/.done; Input files updated by another job: results/annotation/6303_B_hap1.gtf; Set of input files has changed since last execution; Code has changed since last execution; Software environment definition has changed since last execution
+    wildcards: sample=6303_B_hap1
+    threads: 16
+    resources: tmpdir=/scratch, runtime=240, mem_mb=64000, mem=64 GB, mem_mib=61036
+Activating conda environment: .snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_
+[Tue Apr 21 13:17:00 2026]
+Finished jobid: 1 (Rule: star_index)
+2 of 3 steps (67%) done
+Select jobs to execute...
+Execute 1 jobs...
+
+[Tue Apr 21 13:17:00 2026]
+localrule starsolo_align:
+    input: results/star_index/6303_B_hap1/.done, /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz, /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz, /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt
+    output: results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw/matrix.mtx, results/starsolo/6303_B_hap1/Aligned.sortedByCoord.out.bam, results/starsolo/6303_B_hap1/Solo.out/Gene/Summary.csv, results/starsolo/6303_B_hap1/.done
+    log: logs/starsolo/6303_B_hap1.log
+    jobid: 0
+    benchmark: benchmarks/starsolo/6303_B_hap1.tsv
+    reason: Input files updated by another job: results/star_index/6303_B_hap1/.done
+    wildcards: sample=6303_B_hap1
+    threads: 16
+    resources: tmpdir=/scratch, runtime=480, mem_mb=80000, mem=80 GB, mem_mib=76294
+Activating conda environment: .snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_
+[Tue Apr 21 14:08:16 2026]
+Finished jobid: 0 (Rule: starsolo_align)
+3 of 3 steps (100%) done
+Complete log(s): /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/log/2026-04-21T131400.108759.snakemake.log

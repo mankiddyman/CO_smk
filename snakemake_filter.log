@@ -1,0 +1,31 @@
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job stats:
+job               count
+--------------  -------
+filter_markers        1
+total                 1
+
+Select jobs to execute...
+Execute 1 jobs...
+
+[Fri Apr 24 12:45:33 2026]
+localrule filter_markers:
+    input: results/markers/6303_B_hap1/hifi_raw.vcf.gz
+    output: results/markers/6303_B_hap1/markers.vcf.gz, results/markers/6303_B_hap1/markers.vcf.gz.tbi, results/markers/6303_B_hap1/markers.tsv, results/markers/6303_B_hap1/filter_summary.txt
+    log: logs/filter_markers/6303_B_hap1.log
+    jobid: 0
+    reason: Missing output files: results/markers/6303_B_hap1/markers.tsv
+    wildcards: sample=6303_B_hap1
+    threads: 2
+    resources: tmpdir=/scratch, runtime=60, mem_mb=8000, mem=8 GB, mem_mib=7630
+Activating conda environment: .snakemake/conda/7c26141b5b7c92ef7742182008d09912_
+[W::bcf_hdr_check_sanity] MQ should be declared as Type=Float
+[Fri Apr 24 12:46:15 2026]
+Finished jobid: 0 (Rule: filter_markers)
+1 of 1 steps (100%) done
+Complete log(s): /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/log/2026-04-24T124531.748873.snakemake.log

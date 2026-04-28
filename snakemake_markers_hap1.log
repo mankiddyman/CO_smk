@@ -1,0 +1,32 @@
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Creating conda environment workflow/envs/markers.yaml...
+Downloading and installing remote packages.
+Cleaning up conda package tarballs.
+Environment for /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/workflow/envs/markers.yaml created (location: .snakemake/conda/7c26141b5b7c92ef7742182008d09912_)
+Using shell: /usr/bin/bash
+Provided cores: 64
+Rules claiming more threads will be scaled down.
+Job stats:
+job                   count
+------------------  -------
+call_hifi_variants        1
+marker_diagnostics        1
+total                     2
+
+Select jobs to execute...
+Execute 1 jobs...
+
+[Wed Apr 22 14:53:55 2026]
+localrule call_hifi_variants:
+    input: /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta, /biodata/dep_mercier/grp_marques/marques/Cuscuta-genomes/C_epithymum/m54336U_210427_165557.hifi_reads.fasta
+    output: results/markers/6303_B_hap1/hifi.bam, results/markers/6303_B_hap1/hifi.bam.bai, results/markers/6303_B_hap1/hifi_raw.vcf.gz, results/markers/6303_B_hap1/hifi_raw.vcf.gz.tbi
+    log: logs/call_hifi_variants/6303_B_hap1.log
+    jobid: 1
+    reason: Missing output files: results/markers/6303_B_hap1/hifi_raw.vcf.gz
+    wildcards: sample=6303_B_hap1
+    threads: 16
+    resources: tmpdir=/scratch, runtime=720, mem_mb=64000, mem=64 GB, mem_mib=61036
+Activating conda environment: .snakemake/conda/7c26141b5b7c92ef7742182008d09912_
+[bam_sort_core] merging from 10 files and 4 in-memory blocks...

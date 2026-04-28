@@ -1,0 +1,64 @@
+Assuming unrestricted shared filesystem usage.
+host: hpc09
+Building DAG of jobs...
+Creating conda environment workflow/envs/cell_calling.yaml...
+Downloading and installing remote packages.
+Cleaning up conda package tarballs.
+Environment for /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/workflow/envs/cell_calling.yaml created (location: .snakemake/conda/f42300331694f54b380b8b1009400a36_)
+Using shell: /usr/bin/bash
+Provided cores: 32
+Rules claiming more threads will be scaled down.
+Job stats:
+job             count
+------------  -------
+cell_calling        1
+total               1
+
+Select jobs to execute...
+Execute 1 jobs...
+
+[Wed Apr 22 12:39:42 2026]
+localrule cell_calling:
+    input: results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw/matrix.mtx
+    output: results/cells/6303_B_hap1/barcodes_emptydrops.tsv, results/cells/6303_B_hap1/barcodes_knee.tsv, results/cells/6303_B_hap1/barcode_stats.tsv, results/cells/6303_B_hap1/qc_summary.tsv, results/cells/6303_B_hap1/knee_plot.png
+    log: logs/cell_calling/6303_B_hap1.log
+    jobid: 0
+    reason: Missing output files: results/cells/6303_B_hap1/qc_summary.tsv
+    wildcards: sample=6303_B_hap1
+    resources: tmpdir=/scratch, runtime=60, mem_mb=32000, mem=32 GB, mem_mib=30518
+Activating conda environment: .snakemake/conda/f42300331694f54b380b8b1009400a36_
+RuleException:
+CalledProcessError in file "/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/workflow/Snakefile", line 153:
+Command 'source /netscratch/dep_mercier/grp_marques/Aaryan/micromamba_envs/smk/bin/activate '/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/f42300331694f54b380b8b1009400a36_'; set -euo pipefail;  
+        Rscript workflow/scripts/cell_calling.R             --matrix_dir results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw             --out_dir results/cells/6303_B_hap1             --sample 6303_B_hap1             --lower 100             --fdr 0.001             --niters 10000             > logs/cell_calling/6303_B_hap1.log 2>&1' returned non-zero exit status 1.
+[Wed Apr 22 12:40:02 2026]
+Error in rule cell_calling:
+    message: None
+    jobid: 0
+    input: results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw/matrix.mtx
+    output: results/cells/6303_B_hap1/barcodes_emptydrops.tsv, results/cells/6303_B_hap1/barcodes_knee.tsv, results/cells/6303_B_hap1/barcode_stats.tsv, results/cells/6303_B_hap1/qc_summary.tsv, results/cells/6303_B_hap1/knee_plot.png
+    log: logs/cell_calling/6303_B_hap1.log (check log file(s) for error details)
+    conda-env: /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/f42300331694f54b380b8b1009400a36_
+    shell:
+        
+        Rscript workflow/scripts/cell_calling.R             --matrix_dir results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw             --out_dir results/cells/6303_B_hap1             --sample 6303_B_hap1             --lower 100             --fdr 0.001             --niters 10000             > logs/cell_calling/6303_B_hap1.log 2>&1
+        
+        (command exited with non-zero exit code)
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Wed Apr 22 12:40:02 2026]
+Error in rule cell_calling:
+    message: None
+    jobid: 0
+    input: results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw/matrix.mtx
+    output: results/cells/6303_B_hap1/barcodes_emptydrops.tsv, results/cells/6303_B_hap1/barcodes_knee.tsv, results/cells/6303_B_hap1/barcode_stats.tsv, results/cells/6303_B_hap1/qc_summary.tsv, results/cells/6303_B_hap1/knee_plot.png
+    log: logs/cell_calling/6303_B_hap1.log (check log file(s) for error details)
+    conda-env: /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/f42300331694f54b380b8b1009400a36_
+    shell:
+        
+        Rscript workflow/scripts/cell_calling.R             --matrix_dir results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw             --out_dir results/cells/6303_B_hap1             --sample 6303_B_hap1             --lower 100             --fdr 0.001             --niters 10000             > logs/cell_calling/6303_B_hap1.log 2>&1
+        
+        (command exited with non-zero exit code)
+Complete log(s): /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/log/2026-04-22T123531.030333.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.
