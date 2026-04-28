@@ -17,7 +17,8 @@ rule all:
         expand("results/cells/{sample}/knee_plot.pdf",sample=SAMPLES),
         expand("results/markers/{sample}/diagnostic_histograms.pdf", sample=marker_samples),
         expand("results/snps/{sample}/cellSNP.tag.DP.mtx", sample=SAMPLES),
-
+        expand("results/cell_qc/{sample}/good_cells.tsv", sample=SAMPLES),
+        expand("results/cell_qc/{sample}/switch_diagnostics.pdf", sample=SAMPLES),
 rule gff_to_gtf:
     input:
         gff = lambda w: samples.loc[w.sample, "annotation_gff"],
@@ -452,5 +453,36 @@ rule switch_diagnostics:
         Rscript workflow/scripts/switch_diagnostics.R \
             --cell_data_dir {params.cell_data_dir} \
             --out_dir {params.out_dir} \
+            > {log} 2>&1
+        """
+
+
+
+rule select_cells:
+    """Apply cell QC thresholds to identify cells suitable for CO calling."""
+    input:
+        switches = "results/cell_qc/{sample}/switches.tsv",
+    output:
+        good_cells = "results/cell_qc/{sample}/good_cells.tsv",
+        summary = "results/cell_qc/{sample}/selection_summary.txt",
+    log: "logs/select_cells/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 4000,
+        runtime = 10,
+    conda: "envs/cell_qc.yaml"
+    params:
+        min_total = config["cell_qc"]["min_total_markers"],
+        min_per_chrom = config["cell_qc"]["min_per_chrom_markers"],
+        max_sr = config["cell_qc"]["max_switch_rate"],
+    shell:
+        """
+        Rscript workflow/scripts/select_cells.R \
+            --switches {input.switches} \
+            --out {output.good_cells} \
+            --out_summary {output.summary} \
+            --min_total_markers {params.min_total} \
+            --min_per_chrom_markers {params.min_per_chrom} \
+            --max_switch_rate {params.max_sr} \
             > {log} 2>&1
         """

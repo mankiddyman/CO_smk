@@ -8,3 +8,14 @@ marker_filters:
   min_qual: 30
   min_alt_ratio: 0.3
   max_alt_ratio: 0.7
+
+
+# Stage 3 cell QC thresholds
+cell_qc:
+  # Genotype call thresholds (per-marker AF cutoffs)
+  ref_low: 0.2       # alt_ratio < this -> REF call (genotype 0)
+  alt_high: 0.8      # alt_ratio > this -> ALT call (genotype 1)
+  # Cell quality filters (primary tier)
+  min_total_markers: 2500
+  min_per_chrom_markers: 100
+  max_switch_rate: 0.09

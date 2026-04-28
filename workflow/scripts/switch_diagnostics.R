@@ -54,13 +54,12 @@ process_cell <- function(filepath) {
                       switch_rate = NA, stringsAsFactors = FALSE))
   }
 
-  # Per-marker genotype
+  # Per-marker genotype: 0=REF, 1=ALT, 0.5=ambiguous (matches Meng's encoding)
   alt_ratio <- df$alt_count / (df$ref_count + df$alt_count)
-  geno <- ifelse(alt_ratio < opt$ref_low, 0L,
-          ifelse(alt_ratio > opt$alt_high, 1L, NA_integer_))  # NA = ambiguous (Meng's 0.5)
+  geno <- ifelse(alt_ratio < opt$ref_low, 0,
+          ifelse(alt_ratio > opt$alt_high, 1, 0.5))
 
-  # Per-chromosome switch counting (don't count transitions across chromosomes as switches)
-  total_switches <- 0L
+  # Per-chromosome switch counting — switches do NOT cross chromosome boundaries
   per_chrom_switches <- integer(nrow(chrom_map))
   per_chrom_markers <- integer(nrow(chrom_map))
   names(per_chrom_switches) <- chrom_map$name
@@ -71,23 +70,13 @@ process_cell <- function(filepath) {
     chrom_geno <- geno[df$chrom == chrom_name]
     per_chrom_markers[i] <- length(chrom_geno)
     if (length(chrom_geno) >= 2) {
-      # Switch = consecutive markers differ. NA != non-NA also counts as a switch
-      # (matching Meng's behavior: 0.5 -> 1 is a switch).
-      switches <- sum(diff(chrom_geno) != 0, na.rm = FALSE)
-      # Above can produce NA when comparing to NA — handle:
-      diffs <- chrom_geno[-1] - chrom_geno[-length(chrom_geno)]
-      # treat NA-NA as 0, NA-X or X-NA as switch (geno changed)
-      # Meng's behavior: 0.5 in middle of run of 0s creates 2 switches (0->0.5, 0.5->0)
-      # Replicate that: anywhere genotype value changes counts as switch
-      g <- chrom_geno
-      g[is.na(g)] <- 0.5  # encode ambiguous as 0.5 like Meng
-      switches <- sum(g[-1] != g[-length(g)])
-      per_chrom_switches[i] <- switches
-      total_switches <- total_switches + switches
+      # A "switch" = adjacent markers have different genotype values
+      per_chrom_switches[i] <- sum(chrom_geno[-1] != chrom_geno[-length(chrom_geno)])
     }
   }
+  total_switches <- sum(per_chrom_switches)
 
-  # Build per-chrom output as a wide row
+  # Build output row
   result <- data.frame(
     barcode = bc,
     total_markers = total_markers,
@@ -95,14 +84,12 @@ process_cell <- function(filepath) {
     switch_rate = total_switches / total_markers,
     stringsAsFactors = FALSE
   )
-  # Append per-chrom marker counts and switch counts
   for (chr in chrom_map$name) {
     result[[paste0("markers_", chr)]] <- per_chrom_markers[chr]
     result[[paste0("switches_", chr)]] <- per_chrom_switches[chr]
   }
   return(result)
 }
-
 cat("Processing cells...\n")
 results <- do.call(rbind, lapply(seq_along(cell_files), function(i) {
   if (i %% 500 == 0) cat("  ", i, "/", length(cell_files), "\n")

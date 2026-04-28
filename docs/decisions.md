@@ -429,3 +429,67 @@ per cell, in the format expected by Meng's `hapCO_identification.R`:
 This map is the bridge from Meng's integer-numbered chromosome convention
 to our scaffold names. Per-cell files keep scaffold names directly;
 chromsome-size lookups in downstream scripts go through the map.
+
+
+
+---
+
+## 2026-04-28 — Stage 3b/3c: cell QC and selection
+
+**Decision:** Two-step QC for selecting cells suitable for CO calling.
+
+**Stage 3b — switch_diagnostics:** for every cell, compute per-marker
+genotype calls (alt_ratio thresholds 0.2/0.8) and count haplotype switches
+per chromosome (NOT across chromosome boundaries — that was a minor flaw
+in Meng's bash code). Output: switches.tsv with total/per-chrom marker
+and switch counts, plus diagnostic histograms.
+
+**Stage 3c — select_cells:** apply thresholds to switches.tsv to write
+good_cells.tsv (one barcode per line) for downstream CO calling.
+
+**Thresholds for Cuscuta epithymum hap1:**
+- total markers ≥ 2,500
+- per-chromosome markers ≥ 100
+- switch rate ≤ 0.09
+
+**Result:** 90 cells pass (1.3% of 6,874 called cells).
+Median marker count 3,506; median switch rate 0.073.
+
+**Reasoning:**
+- Our switch rate distribution is shifted ~1.5x higher than Meng's R. breviuscula
+  data: median 0.152 vs her 0.095. Likely driven by reference bias (median
+  ALT ratio 0.39 in HiFi suggests ~20% of true ALT reads systematically
+  undercounted; this propagates to scRNA-seq) plus dense markers amplifying
+  noise per cell.
+- Visual inspection of cells across switch-rate bands showed:
+  - sr ≤ 0.08: cleanly callable, clear haplotype blocks after smoothing
+  - sr 0.08-0.09: callable with low coverage being limiting; smoothing
+    rescues most patterns
+  - sr ≥ 0.10: unreliable, smoothing breaks down
+- Marker count was a stronger predictor of callability than switch rate
+  per se — cells with >3,000 markers were callable even at sr=0.10, while
+  sparse cells (< 2,000 markers) were dicey even at sr=0.07.
+- Combined filter chosen to optimize for: cells where smoothing recovers
+  clean haplotype patterns AND switch rate is low enough that doublets/
+  contaminated cells are excluded. Visual spot-check on calibration PDF
+  with 12 cells confirmed the threshold lands where callability breaks down.
+
+**Comparison to literature (rough sanity check on n):**
+- Shi et al 2019 (pear): 12 cells published a recombination map.
+- Castellani et al 2024 (R. breviuscula, our lab's prior paper): 644 cells.
+- Dreissig et al 2017 (barley): 24 cells.
+- Our 90 cells is comfortably in the publishable range for a single-individual
+  recombination landscape.
+
+**Optional secondary tier (not implemented):** ≥2,000 markers, sr ≤ 0.10
+gives 151 cells. Could be used for sensitivity analysis if the primary
+landscape looks suspiciously sparse.
+
+**Note on what we changed from Meng's pipeline:**
+- Meng used sr ≤ 0.13, ≥300 total markers; chromosome-transition switches
+  not separated.
+- Our thresholds are stricter (sr ≤ 0.09, ≥2,500 markers) because our
+  switch-rate distribution is shifted higher.
+- We count switches per chromosome separately, then sum, rather than across
+  the full sorted file. Avoids spurious "switches" at chromosome boundaries.
+
