@@ -308,3 +308,96 @@ Yields ~4.3M markers from 6.8M het biallelic SNPs (63% retention).
   space markers more widely.
 - CO calls look overclustered → reference bias may be misleading
   per-cell calls; tighten to 0.4-0.6 and re-examine.
+
+
+
+
+---
+
+## 2026-04-23 — Parallel HiFi variant calling
+
+**Decision:** Split variant calling by scaffold. Three rules:
+- `hifi_align` — one BAM per sample (minimap2, ~28 min for hap1)
+- `hifi_variants_per_chrom` — one VCF per scaffold (bcftools mpileup + call, parallel)
+- `hifi_variants_merge` — concatenate scaffolds into final VCF
+
+**Reasoning:**
+- First serial attempt ran 22h before being killed. `bcftools mpileup --threads`
+  only parallelizes BCF compression, not the pileup scan itself.
+- Parallel version ran in ~10h wall time, bounded by largest scaffold
+  (scaffold_1 at 115 Mb ~ 10h on its own).
+- Lesson: for big bcftools jobs, parallelize at the Snakemake level by region.
+
+**Future improvement:** could split largest scaffolds into sub-regions
+to break the scaffold_1 ceiling. Not implemented — 10h is acceptable
+and adds complexity. Backlogged.
+
+---
+
+## 2026-04-24 — Marker filter thresholds
+
+**Decision:** Filter raw HiFi VCF to biallelic het SNPs with:
+- DP: 10-80
+- QUAL: ≥30
+- ALT allele ratio: 0.3-0.7
+
+**Result:** 4,248,719 markers from 7,305,567 raw variants (58% retention).
+Per-chrom marker counts scale roughly with chromosome length.
+
+**Reasoning:**
+- Diagnostic histograms on hap1 showed healthy library: modal DP ≈40x,
+  QUAL almost always >200, ALT ratio centered near 0.5.
+- DP<10 drops noisy low-coverage calls; DP>80 excludes repeat/paralog pileups.
+- QUAL≥30 is a safety net — most variants pass regardless.
+- Ratio 0.3-0.7 retains the heterozygous distribution including the left
+  shoulder caused by reference bias (median observed at 0.39, not 0.5).
+  Tightening to 0.4-0.6 was considered but would cut genuine hets due to
+  the asymmetric shift.
+
+**Reference bias context:** *C. epithymum* is highly heterozygous
+(~1 het per 90bp). On a HiFi read averaging ~170 het sites, this compounds
+the alignment-mismatch penalty for alt-carrying reads. Reads with the alt
+allele are systematically slightly worse-aligned and undercounted.
+Need to re-apply this correction at per-cell allele counting (Stage 2)
+or at downstream CO calling (Stage 3/4).
+
+**Marker count is much larger than needed:** 4.2M vs ~60k needed for
+~10 kb CO resolution on a 600 Mb genome. Kept the full set; subset
+later if performance requires (e.g. limit to expressed-gene markers).
+
+---
+
+## 2026-04-25 — Stage 2: per-cell allele counting
+
+**Decision:** Use cellsnp-lite (not pysam, not custom bcftools post-processing,
+not per-cell BAM demultiplexing) for per-cell allele counts.
+
+**Reasoning:**
+- Demultiplexing scRNA BAM into 6,874 per-cell BAMs would inflate disk
+  ~3-5x, hammer filesystem with file-count, and be ~10x slower.
+- cellsnp-lite walks the BAM once with parallel-by-region; built for exactly
+  this case (BAM with CB tags + SNP list → sparse cell × site matrices).
+- Validated on a scaffold_1:1-50Mb subset (434k markers, 25 min): UMI
+  dedup confirmed (18 reads → 5 unique molecules at one spot-check site),
+  AD/DP/OTH outputs match by-hand counts.
+
+**Settings:**
+- `--minMAPQ 20`, `--minLEN 30` — reject low-quality/short alignments
+- `--cellTAG CB --UMItag UB` — STARsolo's corrected cell + UMI tags
+- `--minCOUNT 1` — accept any (cell, site) pair with ≥1 UMI;
+  per-cell DP filtering happens downstream
+- `--minMAF 0` — markers are already curated, don't refilter
+
+**Result on hap1:**
+- 694,537 of 4.25M markers had any scRNA coverage (16%) — consistent with
+  scRNA only seeing expressed gene regions in pollen.
+- 8.26M non-zero (cell, site) entries in DP matrix.
+- 3.69M non-zero entries in AD matrix (45% of DP entries had ≥1 ALT UMI).
+- 28k non-zero entries in OTH matrix (0.35% — sequencing errors).
+- Wall time: ~1.5h on full markers with 16 threads.
+
+**Outputs:** `results/snps/{sample}/cellSNP.{tag.DP,tag.AD,tag.OTH}.mtx`,
+`cellSNP.samples.tsv`, `cellSNP.base.vcf.gz` (sites with any coverage).
+
+**Side fix:** `starsolo_align` rule now also outputs `Aligned.sortedByCoord.out.bam.bai`
+(samtools index after STAR), since cellsnp-lite needs an indexed BAM.

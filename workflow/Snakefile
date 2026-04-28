@@ -16,6 +16,7 @@ rule all:
         expand("results/markers/{sample}/markers.tsv", sample=marker_samples),
         expand("results/cells/{sample}/knee_plot.pdf",sample=SAMPLES),
         expand("results/markers/{sample}/diagnostic_histograms.pdf", sample=marker_samples),
+        expand("results/snps/{sample}/cellSNP.tag.DP.mtx", sample=SAMPLES),
 
 rule gff_to_gtf:
     input:
@@ -76,6 +77,7 @@ rule starsolo_align:
     output:
         matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
         bam    = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
+        bai    = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam.bai",
         summary = "results/starsolo/{sample}/Solo.out/Gene/Summary.csv",
         done   = "results/starsolo/{sample}/.done",
     log: "logs/starsolo/{sample}.log"
@@ -111,6 +113,7 @@ rule starsolo_align:
              --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
              --outFileNamePrefix {params.out_prefix} \
              > {log} 2>&1
+        samtools index -@ 4 {output.bam} 2>> {log}
         touch {output.done}
         """
 
@@ -165,7 +168,17 @@ rule cell_calling:
             > {log} 2>&1
         """
 
-
+def marker_sample_for(sample_id):
+    """Map an scRNA sample to the sample that holds its reference marker set.
+    Currently: all scRNA samples of a species point at the species' marker-reference hap."""
+    species = samples.loc[sample_id, "species"]
+    ref_rows = samples[
+        (samples["species"] == species) &
+        (samples["is_marker_reference"] == "yes")
+    ]
+    if len(ref_rows) == 0:
+        raise ValueError(f"No marker reference sample for species {species}")
+    return ref_rows.index[0]
 
 
 def get_chromosomes(sample_id):
@@ -337,4 +350,46 @@ rule filter_markers:
         cut -f1 {output.tsv} | sort | uniq -c >> {output.summary}
         echo "" >> {output.summary}
         echo "Filter params: min_dp={params.min_dp}, max_dp={params.max_dp}, min_qual={params.min_qual}, ratio=[{params.min_ratio},{params.max_ratio}]" >> {output.summary}
+        """
+
+
+rule cell_snp_counting:
+    """Per-cell allele counts at marker positions using cellsnp-lite."""
+    input:
+        bam = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
+        bai = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam.bai",
+        barcodes = "results/cells/{sample}/barcodes_called.tsv",
+        markers = lambda w: f"results/markers/{marker_sample_for(w.sample)}/markers.vcf.gz",
+        markers_tbi = lambda w: f"results/markers/{marker_sample_for(w.sample)}/markers.vcf.gz.tbi",
+    output:
+        dp = "results/snps/{sample}/cellSNP.tag.DP.mtx",
+        ad = "results/snps/{sample}/cellSNP.tag.AD.mtx",
+        oth = "results/snps/{sample}/cellSNP.tag.OTH.mtx",
+        snp_samples = "results/snps/{sample}/cellSNP.samples.tsv",
+        sites = "results/snps/{sample}/cellSNP.base.vcf.gz",
+    log: "logs/cell_snp_counting/{sample}.log"
+    threads: 16
+    resources:
+        mem_mb = 32000,
+        runtime = 480,  # 8h ceiling; subset test was 25 min for 10% of markers
+    conda: "envs/cellsnp.yaml"
+    params:
+        out_dir = lambda w: f"results/snps/{w.sample}",
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        cellsnp-lite \
+            -s {input.bam} \
+            -b {input.barcodes} \
+            -R {input.markers} \
+            -O {params.out_dir} \
+            -p {threads} \
+            --minMAPQ 20 \
+            --minLEN 30 \
+            --minCOUNT 1 \
+            --minMAF 0 \
+            --cellTAG CB \
+            --UMItag UB \
+            --gzip \
+            > {log} 2>&1
         """
