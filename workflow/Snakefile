@@ -5,6 +5,7 @@ configfile: "config/config.yaml"
 
 samples = pd.read_csv("config/samples.csv").set_index("sample_id", drop=False)
 SAMPLES = samples.index.tolist()
+SAMPLES = [s for s in SAMPLES if s != "6303_B_hap2"]
 marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
 # ...
 
@@ -516,7 +517,7 @@ rule co_calling:
     shell:
         r"""
         mkdir -p {params.out_dir}
-
+        rm -f {params.out_dir}/*_co_pred.txt {params.out_dir}/*_co_block_pred.txt {params.out_dir}/*_co.pdf
         # Document parameters used
         cat > {output.params_log} <<EOF
 co_calling parameters:

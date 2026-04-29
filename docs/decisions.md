@@ -563,3 +563,52 @@ need to re-run calling to test other thresholds.
   markers VCF returns 0 sites because scaffold names don't match between
   haplotypes. Two paths: (A) skip hap2, hap1 is sufficient; (B) run
   variant calling separately on hap2. Deferred.
+
+
+---
+
+## 2026-04-29 — Stage 3d revisions: append-mode bug + threshold tuning
+
+**Bug fixed:** The hapCO_identification.R script's append-mode write
+(`append = chr_idx > 1`) didn't reset between Snakemake re-runs of the
+same cell. Multiple `--forcerun co_calling` invocations triplicated
+per-cell `_co_pred.txt` files. Caught when investigating high-CO tail
+showed cells with exactly 3 COs on multiple chromosomes — telltale
+data duplication pattern.
+
+Fix: added `rm -f {params.out_dir}/*_co_pred.txt
+{params.out_dir}/*_co_block_pred.txt {params.out_dir}/*_co.pdf` at the
+start of the co_calling rule's shell block. Idempotent re-runs now
+produce correct output regardless of file state.
+
+**Threshold revised: marker_num 50 → 30.**
+
+After fixing the duplication bug, fresh CO calls with -n 50 gave 260
+total COs / mean 2.89 per cell. Visual inspection of 3 cells (zero,
+mid, high) showed the algorithm was over-filtering: clear haplotype
+blocks visible by eye but rejected because their marker support fell
+in the 30-50 range.
+
+Re-ran with -n 30. Distribution shows real COs are recovered:
+  - Total: 350 COs (was 260)
+  - Mean: 3.89 / cell (was 2.89)
+  - Median: 4 (was 3)
+  - 0-CO cells: 1 (was 6)
+  - Visual inspection on same 3 cells confirms missed COs now recovered
+  - No new spurious DCOs appeared
+
+Reasoning: yesterday's distribution showed the artifact zone was
+mostly markers <30 (suspicious DCO blocks were 9, 10, 13, 19, 19, 30
+markers). The (30,50] zone was largely real-but-lower-supported COs.
+
+**Final hap1 result:**
+- 350 COs across 90 cells (89 with ≥1 CO)
+- Mean 3.89 / median 4 COs per cell
+- 0.55 COs / chromatid average
+- Per-chromosome rates: 0.46-0.74 (length-correlated)
+- scaffold_1 highest (115 Mb): 67 COs, 0.74/cell
+- scaffold_7 lowest (63 Mb): 41 COs, 0.46/cell
+
+**Hap2 deferred:** SAMPLES filter added in Snakefile to exclude hap2
+from `rule all`. Hap2 needs separate variant calling on hap2 reference;
+deferred until after hap1 results published.

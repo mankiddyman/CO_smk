@@ -26,4 +26,4 @@ cell_qc:
 co_calling:
   cell_markers: 2500    # match upstream cell selection threshold
   block_size: 2000000   # 2 Mb min block size
-  marker_num: 50         # min markers per block. used to be 8 , raised based on marker support distribution
+  marker_num: 30         # min markers per block. used to be 8 , raised based on marker support distribution, we tried 50, misse dsome real co now trying 30
