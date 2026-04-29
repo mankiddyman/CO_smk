@@ -19,3 +19,11 @@ cell_qc:
   min_total_markers: 2500
   min_per_chrom_markers: 100
   max_switch_rate: 0.09
+
+
+
+# Stage 3d CO calling parameters (Meng's defaults for Rhynchospora)
+co_calling:
+  cell_markers: 2500    # match upstream cell selection threshold
+  block_size: 2000000   # 2 Mb min block size
+  marker_num: 50         # min markers per block. used to be 8 , raised based on marker support distribution

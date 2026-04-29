@@ -493,3 +493,73 @@ landscape looks suspiciously sparse.
 - We count switches per chromosome separately, then sum, rather than across
   the full sorted file. Avoids spurious "switches" at chromosome boundaries.
 
+---
+
+## 2026-04-29 — Stage 3d: per-cell CO calling
+
+**Decision:** Adapt Meng's `hapCO_identification.R` to call crossovers
+per cell on the 90 selected good cells. Aggregate per-cell calls into
+landscape diagnostics.
+
+**Implementation:**
+- `workflow/scripts/hapCO_identification.R`: Modified Meng's R script to
+  read scaffold names from chrom_map.tsv (instead of integer chromosome
+  IDs from genome.fai). Otherwise unchanged: same smoothing, same block
+  filter, same breakpoint refinement.
+- `workflow/scripts/co_aggregate.R`: New script. Reads per-cell
+  `_co_pred.txt` files and produces co_summary.txt, co_intervals.bed,
+  co_per_cell.tsv, and co_diagnostics.pdf.
+- `co_calling` rule: parallelized via `xargs -P {threads}`. One R script
+  invocation per cell, ~1-2 sec each.
+- `co_aggregate` rule: single job, reads all per-cell outputs, produces
+  aggregate diagnostics.
+
+**Parameters chosen for Cuscuta epithymum hap1:**
+- `cell_markers: 2500` (matches our cell selection threshold)
+- `block_size: 2000000` (Meng's default for Rhynchospora)
+- `marker_num: 50` (raised from Meng's default of 8)
+
+**Reasoning for raising marker_num to 50:**
+
+Initial run with Meng's default `-n 8` produced 505 COs (mean 5.61/cell).
+Visual inspection of per-cell PDFs flagged ~4 cells with suspicious
+short intercalated DCO segments. Examination of the marker_count column
+in `_co_pred.txt` files showed these suspicious blocks were supported
+by only 9-30 markers, while well-supported COs had blocks with 100-400+
+markers.
+
+Distribution of marker_count across all 505 calls:
+  - (8,15]:    44 COs  (likely noise — sparse-block artifacts)
+  - (15,30]:   41 COs  (mostly noise)
+  - (30,50]:   32 COs  (border zone)
+  - (50,100]:  60 COs  (mostly real)
+  - (100,500]: 304 COs (solid)
+  - (500,Inf]:  24 COs (very solid)
+
+No clean bimodal cut in the distribution. Set threshold at 50 markers
+as a defensible round number that:
+  - Eliminates the suspicious 9-30 marker blocks
+  - Retains all 100+ marker blocks (clearly real)
+  - Drops 23% of calls (505 → 484... actually higher with full -n 50:
+    final result is 484 COs at -n 50)
+  - Per-chromosome rate: scaffold_1 dropped from 1.31 to 1.00 COs/cell
+    (length-normalized: ~1.0 CO per 10Mb across all 7 chromosomes)
+
+Choice of A vs B (calling parameter vs post-hoc filter): Implemented as
+A — change `-n` in CO calling. Means per-cell PDFs reflect filtered
+calls directly. Tradeoff: harder to do sensitivity analysis later,
+need to re-run calling to test other thresholds.
+
+**Final result for hap1:**
+- 484 total COs across 90 cells
+- Mean 5.38, median 5 COs per cell
+- Per-chromosome counts roughly proportional to chromosome length
+  (uniform CO density of ~1.0 per 10 Mb across all 7 scaffolds)
+- Long tail: cells with 9-14 COs (n=18). Flagged for investigation.
+
+**Unfinished work:**
+- Investigate high-CO tail (cells with ≥9 COs).
+- Hap2 pipeline currently broken: hap2 BAM aligned against hap1-derived
+  markers VCF returns 0 sites because scaffold names don't match between
+  haplotypes. Two paths: (A) skip hap2, hap1 is sufficient; (B) run
+  variant calling separately on hap2. Deferred.

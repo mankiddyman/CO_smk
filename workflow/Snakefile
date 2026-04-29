@@ -19,6 +19,8 @@ rule all:
         expand("results/snps/{sample}/cellSNP.tag.DP.mtx", sample=SAMPLES),
         expand("results/cell_qc/{sample}/good_cells.tsv", sample=SAMPLES),
         expand("results/cell_qc/{sample}/switch_diagnostics.pdf", sample=SAMPLES),
+        expand("results/crossovers/{sample}/.done", sample=SAMPLES),
+        expand("results/crossovers/{sample}/co_diagnostics.pdf", sample=SAMPLES),
 rule gff_to_gtf:
     input:
         gff = lambda w: samples.loc[w.sample, "annotation_gff"],
@@ -110,6 +112,7 @@ rule starsolo_align:
              --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
              --soloCellFilter None \
              --soloBarcodeReadLength 0 \
+             --limitBAMsortRAM 20000000000 \
              --outSAMtype BAM SortedByCoordinate \
              --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
              --outFileNamePrefix {params.out_prefix} \
@@ -484,5 +487,91 @@ rule select_cells:
             --min_total_markers {params.min_total} \
             --min_per_chrom_markers {params.min_per_chrom} \
             --max_switch_rate {params.max_sr} \
+            > {log} 2>&1
+        """
+
+
+
+rule co_calling:
+    """Call crossovers per cell using hapCO_identification.R.
+    Runs in parallel across cells via xargs -P {threads}."""
+    input:
+        good_cells = "results/cell_qc/{sample}/good_cells.tsv",
+        chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+    output:
+        marker_file = "results/crossovers/{sample}/.done",
+        params_log = "results/crossovers/{sample}/co_calling_params.txt",
+    log: "logs/co_calling/{sample}.log"
+    threads: 8
+    resources:
+        mem_mb = 16000,
+        runtime = 60,
+    conda: "envs/cell_qc.yaml"
+    params:
+        cell_data_dir = lambda w: f"results/cell_data/{w.sample}",
+        out_dir = lambda w: f"results/crossovers/{w.sample}/per_cell",
+        cell_markers = config["co_calling"]["cell_markers"],
+        block_size = config["co_calling"]["block_size"],
+        marker_num = config["co_calling"]["marker_num"],
+    shell:
+        r"""
+        mkdir -p {params.out_dir}
+
+        # Document parameters used
+        cat > {output.params_log} <<EOF
+co_calling parameters:
+  cell_markers (-c): {params.cell_markers}
+  block_size   (-s): {params.block_size}
+  marker_num   (-n): {params.marker_num}
+  threads:           {threads}
+EOF
+
+        # Run R script per cell, parallelized via xargs
+        cat {input.good_cells} | xargs -I {{}} -P {threads} -n 1 \
+            bash -c '
+                bc="$1"
+                Rscript workflow/scripts/hapCO_identification.R \
+                    --input {params.cell_data_dir}/${{bc}}.tsv \
+                    --prefix "${{bc}}" \
+                    --chrom_map {input.chrom_map} \
+                    --outpath {params.out_dir} \
+                    --cell_markers {params.cell_markers} \
+                    --block_size {params.block_size} \
+                    --marker_num {params.marker_num} \
+                    >> {log} 2>&1
+            ' _ {{}}
+
+        touch {output.marker_file}
+        echo "co_calling complete: $(wc -l < {input.good_cells}) cells processed" >> {log}
+        """
+
+
+rule co_aggregate:
+    """Aggregate per-cell CO calls into landscape summary."""
+    input:
+        co_done = "results/crossovers/{sample}/.done",
+        good_cells = "results/cell_qc/{sample}/good_cells.tsv",
+        chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+    output:
+        summary = "results/crossovers/{sample}/co_summary.txt",
+        bed = "results/crossovers/{sample}/co_intervals.bed",
+        per_cell = "results/crossovers/{sample}/co_per_cell.tsv",
+        diag = "results/crossovers/{sample}/co_diagnostics.pdf",
+    log: "logs/co_aggregate/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 8000,
+        runtime = 30,
+    conda: "envs/cell_qc.yaml"
+    params:
+        co_dir = lambda w: f"results/crossovers/{w.sample}/per_cell",
+        out_dir = lambda w: f"results/crossovers/{w.sample}",
+    shell:
+        """
+        Rscript workflow/scripts/co_aggregate.R \
+            --co_dir {params.co_dir} \
+            --good_cells {input.good_cells} \
+            --chrom_map {input.chrom_map} \
+            --out_dir {params.out_dir} \
             > {log} 2>&1
         """
