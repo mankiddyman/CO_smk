@@ -27,3 +27,10 @@ co_calling:
   cell_markers: 2500    # match upstream cell selection threshold
   block_size: 2000000   # 2 Mb min block size
   marker_num: 30         # min markers per block. used to be 8 , raised based on marker support distribution, we tried 50, misse dsome real co now trying 30
+
+
+# Stage 4 — recombination landscape plotting
+landscape:
+  bin_mb: 5             # window size for sliding-window CO rate (Mb)
+  coc_interval_mb: 5    # interval size for CoC binning (Mb)
+  n_boot: 500           # bootstrap iterations for CIs

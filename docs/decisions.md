@@ -612,3 +612,31 @@ markers). The (30,50] zone was largely real-but-lower-supported COs.
 **Hap2 deferred:** SAMPLES filter added in Snakefile to exclude hap2
 from `rule all`. Hap2 needs separate variant calling on hap2 reference;
 deferred until after hap1 results published.
+
+
+---
+
+## 2026-04-29 — Stage 4: recombination landscape plotting
+
+Single Snakemake rule + R script producing 5 publication figures and 3 summary
+tables from CO calls. ggplot2-based, modular (one function per plot), uses
+cairo_pdf for UTF-8 handling.
+
+Outputs per sample in results/landscape/{sample}/:
+- 01_landscape.pdf: per-chromosome cM/Mb sliding window with bootstrap +/-1 SD
+- 02_marey_maps.pdf: overlaid Marey maps, all chromosomes one panel
+- 03_co_class_proportions.pdf: bars (height = chrom size) showing CO class
+  distribution per chromosome
+- 04_coc.pdf: CoC vs distance, MADpattern binning, opacity = statistical power
+- 05_gamma_interference.pdf: histogram of pooled inter-CO distances with
+  Gamma fit and exponential null
+
+Headline result for hap1:
+- 350 COs, 90 cells, mean 3.89 / cell (CO assurance expectation: ~3.5)
+- Genome-wide rate: 0.83 cM/Mb (389 cM total over 468 Mb)
+- Gamma interference nu = 3.70, 95% CI [2.42, 7.46] — moderate-to-strong
+  positive interference, plant-typical
+
+Per-chromosome Gamma fits omitted: with only 3-11 inter-CO distances per
+chromosome, Gamma estimates were unstable (some hit upper boundary).
+Pooled estimate (n=31 distances) used as primary result.

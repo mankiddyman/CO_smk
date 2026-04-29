@@ -22,6 +22,7 @@ rule all:
         expand("results/cell_qc/{sample}/switch_diagnostics.pdf", sample=SAMPLES),
         expand("results/crossovers/{sample}/.done", sample=SAMPLES),
         expand("results/crossovers/{sample}/co_diagnostics.pdf", sample=SAMPLES),
+        expand("results/landscape/{sample}/01_landscape.pdf", sample=SAMPLES),
 rule gff_to_gtf:
     input:
         gff = lambda w: samples.loc[w.sample, "annotation_gff"],
@@ -574,5 +575,45 @@ rule co_aggregate:
             --good_cells {input.good_cells} \
             --chrom_map {input.chrom_map} \
             --out_dir {params.out_dir} \
+            > {log} 2>&1
+        """
+
+rule recombination_landscape:
+    """Plot recombination landscape, Marey maps, CO class distributions,
+    crossover interference (CoC + Gamma model)."""
+    input:
+        co_intervals = "results/crossovers/{sample}/co_intervals.bed",
+        co_per_cell  = "results/crossovers/{sample}/co_per_cell.tsv",
+        chrom_map    = "results/cell_data/{sample}/chrom_map.tsv",
+    output:
+        landscape    = "results/landscape/{sample}/01_landscape.pdf",
+        marey        = "results/landscape/{sample}/02_marey_maps.pdf",
+        co_classes   = "results/landscape/{sample}/03_co_class_proportions.pdf",
+        coc          = "results/landscape/{sample}/04_coc.pdf",
+        gamma        = "results/landscape/{sample}/05_gamma_interference.pdf",
+        landscape_summary = "results/landscape/{sample}/landscape_summary.tsv",
+        coc_table         = "results/landscape/{sample}/coc_table.tsv",
+        gamma_summary     = "results/landscape/{sample}/gamma_interference_summary.tsv",
+    log: "logs/recombination_landscape/{sample}.log"
+    threads: 4
+    resources:
+        mem_mb = 8000,
+        runtime = 30,
+    conda: "envs/cell_qc.yaml"
+    params:
+        out_dir = lambda w: f"results/landscape/{w.sample}",
+        bin_mb = config.get("landscape", {}).get("bin_mb", 5),
+        coc_interval_mb = config.get("landscape", {}).get("coc_interval_mb", 5),
+        n_boot = config.get("landscape", {}).get("n_boot", 500),
+    shell:
+        """
+        Rscript workflow/scripts/recombination_landscape.R \
+            --co_intervals {input.co_intervals} \
+            --co_per_cell {input.co_per_cell} \
+            --chrom_map {input.chrom_map} \
+            --out_dir {params.out_dir} \
+            --bin_mb {params.bin_mb} \
+            --coc_interval_mb {params.coc_interval_mb} \
+            --n_boot {params.n_boot} \
             > {log} 2>&1
         """
