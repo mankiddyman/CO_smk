@@ -640,3 +640,45 @@ Headline result for hap1:
 Per-chromosome Gamma fits omitted: with only 3-11 inter-CO distances per
 chromosome, Gamma estimates were unstable (some hit upper boundary).
 Pooled estimate (n=31 distances) used as primary result.
+
+
+
+---
+
+## 2026-04-30 — Stage 5: composite landscape figure (karyoploteR)
+
+A4-sized composite figure per sample combining recombination data with
+genomic annotations. One Snakemake rule wraps everything.
+
+Layout per chromosome pair (top to bottom):
+  - SyRI synteny ribbons (hap1<->hap2; SYN gray, INV red)
+  - hap1 ideogram with Mb scale
+  - 5 heatmap tracks: CO rate (cM/Mb), gene density, SNP density,
+    satellite bp fraction, LTR bp fraction
+  - hap2 ideogram (no tracks; context for ribbons)
+
+All 14 chromosomes (7 hap1 + 7 hap2) interleaved as
+hap1_scaffold_1 / hap2_scaffold_2 / hap1_scaffold_3 / ...
+so each ribbon connects adjacent ideograms.
+
+Heatmap tracks use 5 Mb sliding window with 0.5 Mb step. Each track
+auto-scales to its 99th percentile to prevent outlier saturation.
+SyRI ribbons filtered to features >= 100 kb (TRANS records all <100 kb,
+dropped from main figure).
+
+samples.csv extended with 3 new columns:
+  - repeats_ltr_gff       (DANTE_LTR full-genome gff3)
+  - repeats_satellite_gff (TideCluster clustering.gff3)
+  - syri_dir              (SyRI output directory)
+
+Existing columns reused:
+  - annotation_gff        (Helixer per-haplotype gff3, "gene" feature)
+  - assembly_fasta        (hap2.fasta.fai derived from same dir)
+
+markers.vcf.gz path derived from results/markers/{sample}/.
+
+New conda env: workflow/envs/karyoploter.yaml. Bioconductor packages
+(karyoploteR, GenomicRanges, rtracklayer) plus optparse and data.table.
+
+Rule: composite_landscape, ~1-2 min runtime per sample, single PDF
+output: results/composite/{sample}/composite.pdf.

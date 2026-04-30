@@ -34,3 +34,9 @@ landscape:
   bin_mb: 5             # window size for sliding-window CO rate (Mb)
   coc_interval_mb: 5    # interval size for CoC binning (Mb)
   n_boot: 500           # bootstrap iterations for CIs
+
+
+# Stage 5 — composite landscape figure
+composite:
+  win_mb: 5         # sliding window size for all density tracks (Mb)
+  step_mb: 0.5      # sliding step (Mb)

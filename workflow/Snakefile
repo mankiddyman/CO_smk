@@ -23,6 +23,7 @@ rule all:
         expand("results/crossovers/{sample}/.done", sample=SAMPLES),
         expand("results/crossovers/{sample}/co_diagnostics.pdf", sample=SAMPLES),
         expand("results/landscape/{sample}/01_landscape.pdf", sample=SAMPLES),
+        expand("results/composite/{sample}/composite.pdf", sample=SAMPLES),
 rule gff_to_gtf:
     input:
         gff = lambda w: samples.loc[w.sample, "annotation_gff"],
@@ -615,5 +616,51 @@ rule recombination_landscape:
             --bin_mb {params.bin_mb} \
             --coc_interval_mb {params.coc_interval_mb} \
             --n_boot {params.n_boot} \
+            > {log} 2>&1
+        """
+
+
+
+rule composite_landscape:
+    """Composite figure: chromosome ideograms + CO landscape + gene/SNP/satellite/LTR
+    density tracks + SyRI synteny ribbons (hap1<->hap2). karyoploteR-based."""
+    input:
+        co_intervals = "results/crossovers/{sample}/co_intervals.bed",
+        co_per_cell  = "results/crossovers/{sample}/co_per_cell.tsv",
+        chrom_map    = "results/cell_data/{sample}/chrom_map.tsv",
+        markers_vcf  = "results/markers/{sample}/markers.vcf.gz",
+        samples_csv  = "config/samples.csv",
+        # All annotation paths come from samples.csv via the script.
+        # We list them as inputs for cache invalidation:
+        genes_gff    = lambda w: samples.loc[w.sample, "annotation_gff"],
+        ltr_gff      = lambda w: samples.loc[w.sample, "repeats_ltr_gff"],
+        sat_gff      = lambda w: samples.loc[w.sample, "repeats_satellite_gff"],
+        syri_out     = lambda w: f"{samples.loc[w.sample, 'syri_dir']}/syri.out",
+        syri_mapids  = lambda w: f"{samples.loc[w.sample, 'syri_dir']}/mapids.txt",
+        hap2_fai     = lambda w: f"{os.path.dirname(samples.loc[w.sample, 'assembly_fasta'])}/hap2.fasta.fai",
+    output:
+        pdf = "results/composite/{sample}/composite.pdf",
+    log: "logs/composite_landscape/{sample}.log"
+    threads: 2
+    resources:
+        mem_mb = 8000,
+        runtime = 30,
+    conda: "envs/karyoploter.yaml"
+    params:
+        win_mb = config.get("composite", {}).get("win_mb", 5),
+        step_mb = config.get("composite", {}).get("step_mb", 0.5),
+    shell:
+        """
+        Rscript workflow/scripts/composite_landscape.R \
+            --sample_id {wildcards.sample} \
+            --samples_csv {input.samples_csv} \
+            --co_intervals {input.co_intervals} \
+            --co_per_cell {input.co_per_cell} \
+            --chrom_map {input.chrom_map} \
+            --markers_vcf {input.markers_vcf} \
+            --hap2_fai {input.hap2_fai} \
+            --out_pdf {output.pdf} \
+            --win_mb {params.win_mb} \
+            --step_mb {params.step_mb} \
             > {log} 2>&1
         """

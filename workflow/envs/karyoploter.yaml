@@ -1,0 +1,12 @@
+name: karyoploter
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base>=4.3
+  - bioconductor-karyoploter
+  - bioconductor-genomicranges
+  - bioconductor-rtracklayer
+  - bioconductor-genomeinfodb
+  - r-optparse
+  - r-data.table
