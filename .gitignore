@@ -42,3 +42,14 @@ __pycache__/
 # Local config overrides
 config/local.yaml
 EOF
+
+# Loose run logs in repo root
+/snakemake_*.log
+/Rplots.pdf
+/rank_check.pdf
+
+# resources/ is large regenerable data (whitelists ~60M, BLAST proteomes ~200M).
+# Ignore the whole tree, but keep the curated pollen marker FASTA (small, hand-built input).
+resources/
+!resources/pollen_qc/
+!resources/pollen_qc/pollen_markers.faa

@@ -1,5 +1,5 @@
 whitelist_5p_v1: /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt
-
+whitelist_3p_v4: /netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/resources/whitelists/3M-3pgex-may-2023_TRU.txt
 
 
 marker_filters:
@@ -26,8 +26,7 @@ cell_qc:
 co_calling:
   cell_markers: 2500    # match upstream cell selection threshold
   block_size: 2000000   # 2 Mb min block size
-  marker_num: 30         # min markers per block. used to be 8 , raised based on marker support distribution, we tried 50, misse dsome real co now trying 30
-
+  marker_num: 23         # min markers per block. History: 8 -> 50 -> 30 -> 23. 23 = value used for reported Cuscuta figures (373 COs, nu=2.40). Lower catches more close DCOs but risks noise.
 
 # Stage 4 — recombination landscape plotting
 landscape:

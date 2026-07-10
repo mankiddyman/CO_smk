@@ -4,11 +4,16 @@ import os
 configfile: "config/config.yaml"
 
 samples = pd.read_csv("config/samples.csv").set_index("sample_id", drop=False)
-SAMPLES = samples.index.tolist()
-SAMPLES = [s for s in SAMPLES if s != "6303_B_hap2"]
-marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
-# ...
 
+# Samples excluded from `rule all` end-to-end pipeline.
+# Drosera samples currently QC-only: we want starsolo mapping rate
+# but not downstream CO calling (no hifi reads yet, no marker reference).
+DROSERA_QC_ONLY = ["Dbinata_10x", "Dparadoxa_10x"]
+
+SAMPLES = [s for s in samples.index.tolist()
+           if s != "6303_B_hap2"
+           and s not in DROSERA_QC_ONLY]
+marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
 
 rule all:
     input:
@@ -73,13 +78,42 @@ rule star_index:
              > {log} 2>&1
         touch {output.done}
         """
+def starsolo_inputs_for(sample_id):
+    """Pick the right pair of fastq files based on chemistry.
+    Returns (cdna_file, barcode_file) in the order STAR expects."""
+    chem = samples.loc[sample_id, "chemistry"]
+    if chem == "10x_5p_v1":
+        # 5' v1: cDNA on R3, barcode+UMI on R1
+        return samples.loc[sample_id, "scrna_r3"], samples.loc[sample_id, "scrna_r1"]
+    elif chem == "10x_3p_v4":
+        # 3' v4 GEM-X: cDNA on R2, barcode+UMI on R1
+        return samples.loc[sample_id, "scrna_r2"], samples.loc[sample_id, "scrna_r1"]
+    else:
+        raise ValueError(f"Unknown chemistry for {sample_id}: {chem!r}. "
+                         f"Supported: 10x_5p_v1, 10x_3p_v4")
+
+
+def starsolo_params_for(sample_id):
+    """Per-chemistry STARsolo params: UMI length, whitelist, strand."""
+    chem = samples.loc[sample_id, "chemistry"]
+    if chem == "10x_5p_v1":
+        return {"cb_len": 16, "umi_len": 10,
+                "whitelist": config["whitelist_5p_v1"],
+                "strand": "Reverse"}
+    elif chem == "10x_3p_v4":
+        return {"cb_len": 16, "umi_len": 12,
+                "whitelist": config["whitelist_3p_v4"],
+                "strand": "Reverse"}
+    else:
+        raise ValueError(f"Unknown chemistry for {sample_id}: {chem!r}")
+
 
 rule starsolo_align:
     input:
         index = "results/star_index/{sample}/.done",
-        r1    = lambda w: samples.loc[w.sample, "scrna_r1"],
-        r3    = lambda w: samples.loc[w.sample, "scrna_r3"],
-        whitelist = config["whitelist_5p_v1"],
+        cdna  = lambda w: starsolo_inputs_for(w.sample)[0],
+        cb    = lambda w: starsolo_inputs_for(w.sample)[1],
+        whitelist = lambda w: starsolo_params_for(w.sample)["whitelist"],
     output:
         matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
         bam    = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
@@ -96,20 +130,23 @@ rule starsolo_align:
     params:
         index_dir = lambda w: f"results/star_index/{w.sample}",
         out_prefix = lambda w: f"results/starsolo/{w.sample}/",
+        cb_len  = lambda w: starsolo_params_for(w.sample)["cb_len"],
+        umi_len = lambda w: starsolo_params_for(w.sample)["umi_len"],
+        strand  = lambda w: starsolo_params_for(w.sample)["strand"],
     shell:
         """
         mkdir -p {params.out_prefix}
         STAR --runMode alignReads \
              --runThreadN {threads} \
              --genomeDir {params.index_dir} \
-             --readFilesIn {input.r3} {input.r1} \
+             --readFilesIn {input.cdna} {input.cb} \
              --readFilesCommand zcat \
              --soloType CB_UMI_Simple \
              --soloCBwhitelist {input.whitelist} \
-             --soloCBstart 1 --soloCBlen 16 \
-             --soloUMIstart 17 --soloUMIlen 10 \
+             --soloCBstart 1 --soloCBlen {params.cb_len} \
+             --soloUMIstart 17 --soloUMIlen {params.umi_len} \
              --soloFeatures Gene GeneFull \
-             --soloStrand Reverse \
+             --soloStrand {params.strand} \
              --soloUMIfiltering MultiGeneUMI_CR \
              --soloUMIdedup 1MM_CR \
              --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
