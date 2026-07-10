@@ -51,5 +51,4 @@ EOF
 # resources/ is large regenerable data (whitelists ~60M, BLAST proteomes ~200M).
 # Ignore the whole tree, but keep the curated pollen marker FASTA (small, hand-built input).
 resources/
-!resources/pollen_qc/
-!resources/pollen_qc/pollen_markers.faa
+
