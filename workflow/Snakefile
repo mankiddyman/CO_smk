@@ -78,19 +78,31 @@ rule star_index:
              > {log} 2>&1
         touch {output.done}
         """
+def _split_lanes(field):
+    """Split a samples.csv cell into a list of lane files on ';' (repo convention)."""
+    return [p.strip() for p in str(field).split(";") if p.strip()]
+
 def starsolo_inputs_for(sample_id):
-    """Pick the right pair of fastq files based on chemistry.
-    Returns (cdna_file, barcode_file) in the order STAR expects."""
-    chem = samples.loc[sample_id, "chemistry"]
-    if chem == "10x_5p_v1":
-        # 5' v1: cDNA on R3, barcode+UMI on R1
-        return samples.loc[sample_id, "scrna_r3"], samples.loc[sample_id, "scrna_r1"]
-    elif chem == "10x_3p_v4":
-        # 3' v4 GEM-X: cDNA on R2, barcode+UMI on R1
-        return samples.loc[sample_id, "scrna_r2"], samples.loc[sample_id, "scrna_r1"]
+    """Return (cdna_files, barcode_files) as LISTS (one per lane).
+    cDNA file chosen by cdna_read (R2/R3); barcode always R1. Lanes ';'-separated,
+    cDNA and barcode lists must be in matching lane order.
+    Chemistry (UMI len, strand, whitelist) handled in starsolo_params_for."""
+    cdna_col = str(samples.loc[sample_id, "cdna_read"]).strip()
+    if cdna_col == "R2":
+        cdna = _split_lanes(samples.loc[sample_id, "scrna_r2"])
+    elif cdna_col == "R3":
+        cdna = _split_lanes(samples.loc[sample_id, "scrna_r3"])
     else:
-        raise ValueError(f"Unknown chemistry for {sample_id}: {chem!r}. "
-                         f"Supported: 10x_5p_v1, 10x_3p_v4")
+        raise ValueError(f"{sample_id}: cdna_read must be 'R2' or 'R3', got {cdna_col!r}")
+    cb = _split_lanes(samples.loc[sample_id, "scrna_r1"])
+    if len(cdna) != len(cb):
+        raise ValueError(f"{sample_id}: {len(cdna)} cDNA lane(s) vs {len(cb)} barcode lane(s)")
+    return cdna, cb
+
+def starsolo_readfiles_arg(sample_id):
+    """STAR --readFilesIn argument: 'cdna1,cdna2 cb1,cb2' (cDNA first)."""
+    cdna, cb = starsolo_inputs_for(sample_id)
+    return ",".join(cdna) + " " + ",".join(cb)
 
 
 def starsolo_params_for(sample_id):
@@ -130,6 +142,7 @@ rule starsolo_align:
     params:
         index_dir = lambda w: f"results/star_index/{w.sample}",
         out_prefix = lambda w: f"results/starsolo/{w.sample}/",
+        readfiles = lambda w: starsolo_readfiles_arg(w.sample),
         cb_len  = lambda w: starsolo_params_for(w.sample)["cb_len"],
         umi_len = lambda w: starsolo_params_for(w.sample)["umi_len"],
         strand  = lambda w: starsolo_params_for(w.sample)["strand"],
@@ -139,7 +152,7 @@ rule starsolo_align:
         STAR --runMode alignReads \
              --runThreadN {threads} \
              --genomeDir {params.index_dir} \
-             --readFilesIn {input.cdna} {input.cb} \
+             --readFilesIn {params.readfiles} \
              --readFilesCommand zcat \
              --soloType CB_UMI_Simple \
              --soloCBwhitelist {input.whitelist} \
