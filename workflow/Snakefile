@@ -15,6 +15,23 @@ SAMPLES = [s for s in samples.index.tolist()
            and s not in DROSERA_QC_ONLY]
 marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
 
+def param_for(sample_id, section, key):
+    """Resolve a per-species parameter from config.
+
+    config[section] holds a 'default' block plus optional blocks keyed by the
+    `species` column of samples.csv. A species block need only list the keys
+    that differ from default. Species value wins; else default; else KeyError.
+    """
+    sec = config[section]
+    species = samples.loc[sample_id, "species"]
+    if species in sec and isinstance(sec[species], dict) and key in sec[species]:
+        return sec[species][key]
+    if "default" in sec and key in sec["default"]:
+        return sec["default"][key]
+    raise KeyError(f"config[{section!r}]: no {key!r} for species {species!r} and no default")
+
+
+
 rule all:
     input:
         expand("results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx", sample=SAMPLES),
@@ -359,10 +376,77 @@ rule generate_dag:
         snakemake --dag 2>> {log} | dot -Tpng > {output.png} 2>> {log}
         """
 
+rule rrna_blacklist:
+    """Annotate rRNA loci with barrnap and emit a BED of regions whose markers
+    must be excluded.
+
+    Rationale: in poly-A selected scRNA libraries rRNA is not depleted, and
+    rRNA is 80-95% of total RNA by mass, so 18S/28S leak in at high abundance.
+    Where the assembler has collapsed a 45S tandem array, that leakage lands on
+    a few kb of sequence at extreme depth (Spondias_hap1: 13:928-48405, five
+    11154 bp units, ~2.3e6x). cellsnp-lite in -R mode issues one pileup fetch
+    per marker, so markers inside such an array re-fetch the same enormous read
+    stack thousands of times (observed: 10.7 TB read from a 65 GB BAM). Those
+    reads are MAPQ 0 anyway (multi-mapping across near-identical units) and are
+    dropped by --minMAPQ 20, so excluding the markers loses no usable data.
+
+    Note 5S arrays are annotated too but are harmless: 5S is a ~120 nt Pol III
+    transcript, not polyadenylated, and is lost in library size selection
+    (Spondias_hap1 chr4 carries 305 5S copies at 0.9x background depth).
+    """
+    input:
+        fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
+    output:
+        gff = "results/blacklist/{sample}/rrna.gff",
+        bed = "results/blacklist/{sample}/rrna_exclude.bed",
+        summary = "results/blacklist/{sample}/rrna_summary.txt",
+    log: "logs/rrna_blacklist/{sample}.log"
+    threads: 8
+    resources:
+        mem_mb = 4000,
+        runtime = 30,
+    conda: "envs/barrnap.yaml"
+    params:
+        kingdom = config.get("rrna", {}).get("kingdom", "euk"),
+        flank = config.get("rrna", {}).get("flank_bp", 2000),
+        merge_gap = config.get("rrna", {}).get("merge_gap_bp", 3000),
+    shell:
+        r"""
+        barrnap --kingdom {params.kingdom} --threads {threads} \
+            {input.fasta} > {output.gff} 2> {log}
+
+        # GFF is 1-based inclusive; BED is 0-based half-open. Flank absorbs
+        # reads overhanging the annotated feature. merge_gap closes the
+        # intergenic spacers *inside* a tandem array, which are just as deep as
+        # the genes themselves - without it the array emerges as N separate
+        # intervals with pathological holes between them.
+        awk -F'\t' -v f={params.flank} '!/^#/{{
+            s = $4 - 1 - f; if (s < 0) s = 0
+            print $1"\t"s"\t"$5 + f }}' {output.gff} \
+          | sort -k1,1 -k2,2n \
+          | bedtools merge -d {params.merge_gap} -i - > {output.bed} 2>> {log}
+
+        {{
+          echo "barrnap kingdom={params.kingdom} flank={params.flank} merge_gap={params.merge_gap}"
+          echo "rRNA features: $(grep -vc '^#' {output.gff} || true)"
+          echo "merged intervals: $(wc -l < {output.bed})"
+          echo "excluded bp: $(awk '{{s+=$3-$2}} END{{print s+0}}' {output.bed})"
+          echo ""
+          echo "features by chrom and product:"
+          awk -F'\t' '!/^#/{{split($9,a,";"); sub("Name=","",a[1]); print $1"\t"a[1]}}' {output.gff} \
+            | sort | uniq -c
+          echo ""
+          echo "merged intervals:"
+          cat {output.bed}
+        }} > {output.summary}
+        """
+
+
 rule filter_markers:
     """Filter raw HiFi VCF to high-confidence heterozygous SNPs."""
     input:
         vcf = "results/markers/{sample}/hifi_raw.vcf.gz",
+        rrna_bed = "results/blacklist/{sample}/rrna_exclude.bed",
     output:
         vcf = "results/markers/{sample}/markers.vcf.gz",
         tbi = "results/markers/{sample}/markers.vcf.gz.tbi",
@@ -375,11 +459,11 @@ rule filter_markers:
         runtime = 60,
     conda: "envs/markers.yaml"
     params:
-        min_dp = config["marker_filters"]["min_dp"],
-        max_dp = config["marker_filters"]["max_dp"],
-        min_qual = config["marker_filters"]["min_qual"],
-        min_ratio = config["marker_filters"]["min_alt_ratio"],
-        max_ratio = config["marker_filters"]["max_alt_ratio"],
+        min_dp = lambda w: param_for(w.sample, "marker_filters", "min_dp"),
+        max_dp = lambda w: param_for(w.sample, "marker_filters", "max_dp"),
+        min_qual = lambda w: param_for(w.sample, "marker_filters", "min_qual"),
+        min_ratio = lambda w: param_for(w.sample, "marker_filters", "min_alt_ratio"),
+        max_ratio = lambda w: param_for(w.sample, "marker_filters", "max_alt_ratio"),
     shell:
         r"""
         # Filter: biallelic SNPs, het, DP range, QUAL, allele ratio
@@ -389,6 +473,15 @@ rule filter_markers:
             -g het \
             -e 'QUAL < {params.min_qual} || FMT/DP < {params.min_dp} || FMT/DP > {params.max_dp} || (FMT/AD[0:1] / FMT/DP) < {params.min_ratio} || (FMT/AD[0:1] / FMT/DP) > {params.max_ratio}' \
             -Oz -o {output.vcf} {input.vcf} 2> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+
+        # --- Exclude markers inside rRNA arrays (see rule rrna_blacklist) ---
+        # Done here, before the TSV export, so markers.tsv and filter_summary.txt
+        # both report the post-exclusion set.
+        mv {output.vcf} {output.vcf}.prerrna
+        bcftools view -T ^{input.rrna_bed} \
+            -Oz -o {output.vcf} {output.vcf}.prerrna 2>> {log}
+        rm -f {output.vcf}.prerrna {output.vcf}.tbi
         bcftools index -t {output.vcf} 2>> {log}
 
         # Export to simple TSV: chrom, pos, ref, alt
@@ -410,11 +503,52 @@ rule filter_markers:
         """
 
 
-rule cell_snp_counting:
-    """Per-cell allele counts at marker positions using cellsnp-lite."""
+rule filter_bam_uniq:
+    """Pre-filter the STARsolo BAM to reads passing cellsnp's MAPQ threshold.
+
+    WHY: cellsnp-lite applies --minMAPQ AFTER fetching+decompressing each
+    pileup. With a collapsed rDNA array (Spondias chr13:1-49152 held 1.25e9
+    records, 85% of the BAM, 98% MAPQ 0) every fetch decompressed a mountain
+    of reads to keep ~none. Worse, STAR's default ~590kb alignIntronMax makes
+    spurious long introns, so htslib returns those reads for markers hundreds
+    of kb away -- excluding markers by coordinate does NOT help.
+
+    Applying the identical predicate once up front is output-equivalent (we
+    drop only reads cellsnp already discarded) and turns 65GB -> 5.3GB.
+    Verified: per-region `view -c -q N` counts identical before/after.
+
+    NOTE: min_mapq here MUST equal cell_snp_counting's --minMAPQ (both read
+    config cell_snp.min_mapq) or the prefilter silently removes reads cellsnp
+    would have kept."""
     input:
         bam = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
         bai = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam.bai",
+    output:
+        bam = "results/starsolo/{sample}/Aligned.uniq.bam",
+        bai = "results/starsolo/{sample}/Aligned.uniq.bam.bai",
+    log: "logs/filter_bam_uniq/{sample}.log"
+    threads: 8
+    resources:
+        mem_mb = 8000,
+        runtime = 120,
+    conda: "envs/markers.yaml"
+    params:
+        min_mapq = lambda w: param_for(w.sample, "cell_snp", "min_mapq"),
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        samtools view -b -q {params.min_mapq} -@ {threads} \
+            -o {output.bam} {input.bam} 2> {log}
+        samtools index -@ {threads} {output.bam} 2>> {log}
+        echo "records kept: $(samtools view -c -@ 4 {output.bam})" >> {log}
+        """
+
+
+rule cell_snp_counting:
+    """Per-cell allele counts at marker positions using cellsnp-lite."""
+    input:
+        bam = "results/starsolo/{sample}/Aligned.uniq.bam",
+        bai = "results/starsolo/{sample}/Aligned.uniq.bam.bai",
         barcodes = "results/cells/{sample}/barcodes_called.tsv",
         markers = lambda w: f"results/markers/{marker_sample_for(w.sample)}/markers.vcf.gz",
         markers_tbi = lambda w: f"results/markers/{marker_sample_for(w.sample)}/markers.vcf.gz.tbi",
@@ -432,6 +566,7 @@ rule cell_snp_counting:
     conda: "envs/cellsnp.yaml"
     params:
         out_dir = lambda w: f"results/snps/{w.sample}",
+        min_mapq = lambda w: param_for(w.sample, "cell_snp", "min_mapq"),
     shell:
         """
         mkdir -p {params.out_dir}
@@ -441,7 +576,8 @@ rule cell_snp_counting:
             -R {input.markers} \
             -O {params.out_dir} \
             -p {threads} \
-            --minMAPQ 20 \
+            --maxDEPTH 100000 \
+            --minMAPQ {params.min_mapq} \
             --minLEN 30 \
             --minCOUNT 1 \
             --minMAF 0 \
@@ -528,9 +664,9 @@ rule select_cells:
         runtime = 10,
     conda: "envs/cell_qc.yaml"
     params:
-        min_total = config["cell_qc"]["min_total_markers"],
-        min_per_chrom = config["cell_qc"]["min_per_chrom_markers"],
-        max_sr = config["cell_qc"]["max_switch_rate"],
+        min_total = lambda w: param_for(w.sample, "cell_qc", "min_total_markers"),
+        min_per_chrom = lambda w: param_for(w.sample, "cell_qc", "min_per_chrom_markers"),
+        max_sr = lambda w: param_for(w.sample, "cell_qc", "max_switch_rate"),
     shell:
         """
         Rscript workflow/scripts/select_cells.R \
@@ -563,9 +699,9 @@ rule co_calling:
     params:
         cell_data_dir = lambda w: f"results/cell_data/{w.sample}",
         out_dir = lambda w: f"results/crossovers/{w.sample}/per_cell",
-        cell_markers = config["co_calling"]["cell_markers"],
-        block_size = config["co_calling"]["block_size"],
-        marker_num = config["co_calling"]["marker_num"],
+        cell_markers = lambda w: param_for(w.sample, "co_calling", "cell_markers"),
+        block_size = lambda w: param_for(w.sample, "co_calling", "block_size"),
+        marker_num = lambda w: param_for(w.sample, "co_calling", "marker_num"),
     shell:
         r"""
         mkdir -p {params.out_dir}
@@ -659,6 +795,7 @@ rule recombination_landscape:
     shell:
         """
         Rscript workflow/scripts/recombination_landscape.R \
+            --sample_id {wildcards.sample} \
             --co_intervals {input.co_intervals} \
             --co_per_cell {input.co_per_cell} \
             --chrom_map {input.chrom_map} \

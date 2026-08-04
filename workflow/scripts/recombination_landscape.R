@@ -38,6 +38,8 @@ option_list <- list(
   make_option("--co_per_cell",  type = "character"),
   make_option("--chrom_map",    type = "character"),
   make_option("--out_dir",      type = "character"),
+  make_option("--sample_id",    type = "character", default = "sample",
+              help = "Sample label used in plot titles"),
   make_option("--bin_mb",       type = "double",  default = 5,
               help = "Bin size for landscape histogram in Mb [default: %default]"),
   make_option("--coc_interval_mb", type = "double", default = 5,
@@ -182,7 +184,7 @@ plot_landscape <- function(d, out_path, bin_mb,
    labs(
       x        = "Chromosome length (Mb)",
       y        = expression(paste("CO rate (cM Mb"^-1, ")")),
-      title    = sprintf("Recombination landscape - Cuscuta epithymum hap1"),
+      title    = sprintf("Recombination landscape - %s", opt$sample_id),
       subtitle = sprintf(
         paste0(
           "n = %d pollen cells, %d crossovers (mean %.2f / cell)\n",
@@ -285,7 +287,7 @@ plot_marey <- function(d, out_path) {
     labs(
       x        = "Physical position (Mb)",
       y        = "Cumulative genetic distance (cM)",
-      title    = "Marey map - Cuscuta epithymum hap1",
+      title    = sprintf("Marey map - %s", opt$sample_id),
       subtitle = sprintf(
         paste0(
           "n = %d pollen cells, %d crossovers\n",
@@ -390,7 +392,7 @@ plot_co_classes <- function(d, out_path) {
     labs(
       x        = NULL,
       y        = "Chromosome size (Mb)",
-      title    = "Per-chromosome CO class distribution - Cuscuta epithymum hap1",
+      title    = sprintf("Per-chromosome CO class distribution - %s", opt$sample_id),
       subtitle = sprintf(
         paste0(
           "n = %d pollen cells, %d total crossovers (mean %.2f / cell)\n",
@@ -544,7 +546,7 @@ plot_coc <- function(coc_df, out_path, n_cells, interval_mb,
     labs(
       x        = "Inter-interval distance (Mb)",
       y        = "Coefficient of coincidence (CoC)",
-      title    = "Crossover interference (CoC) - Cuscuta epithymum hap1",
+      title    = sprintf("Crossover interference (CoC) - %s", opt$sample_id),
       subtitle = subtitle_text
     ) +
     theme_classic(base_size = 10) +
@@ -651,7 +653,7 @@ plot_gamma_combined <- function(g, out_path, n_cells) {
     labs(
       x        = "Inter-CO distance (Mb)",
       y        = "Density",
-      title    = "Crossover interference - Cuscuta epithymum hap1",
+      title    = sprintf("Crossover interference - %s", opt$sample_id),
       subtitle = sprintf(
         paste0(
           "Gamma model fit to %d inter-CO physical distances (pooled across chromosomes)\n",

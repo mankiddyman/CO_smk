@@ -1,32 +1,118 @@
 whitelist_5p_v1: /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt
 whitelist_3p_v4: /netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/resources/whitelists/3M-3pgex-may-2023_TRU.txt
 
+# ---------------------------------------------------------------------------
+# PER-SPECIES PARAMETERS
+# Each section has a `default:` block (sensible starting point for a NEW
+# species) plus optional blocks keyed by the `species` column of samples.csv.
+# A species block lists only the keys that differ. Resolved by
+# param_for(sample_id, section, key) in workflow/Snakefile.
+#
+# Species blocks are the values ACTUALLY USED for reported results — they are
+# pinned deliberately so changing a default cannot silently alter them.
+# ---------------------------------------------------------------------------
 
+# Stage 1 — het SNP marker filtering from HiFi
 marker_filters:
-  min_dp: 10
-  max_dp: 80
-  min_qual: 30
-  min_alt_ratio: 0.3
-  max_alt_ratio: 0.7
+  default:
+    min_dp: 10
+    max_dp: 80
+    min_qual: 30
+    min_alt_ratio: 0.3
+    max_alt_ratio: 0.7
 
+  Cuscuta_epithymum:
+    # PINNED: values behind the reported figures (373 COs, 90 cells, nu=2.40).
+    min_dp: 10
+    max_dp: 80
+    min_qual: 30
+    min_alt_ratio: 0.3
+    max_alt_ratio: 0.7
 
-# Stage 3 cell QC thresholds
+  Spondias_tuberosa:
+    # HiFi coverage ~91x (median DP of het SNPs; q1=79 q3=104 p90=117).
+    # max_dp=80 sat BELOW the diploid peak and rejected 72% of real het sites,
+    # giving 0.13% het — irreconcilable with the 0.62% in the collaborators'
+    # manuscript. 150 = above the peak, below the 2x-collapsed-paralog line
+    # (~182), on the yield plateau (140->250 gains only 1.3% more markers).
+    # Yields 1.47M markers = 0.53% het (86% of the k-mer estimate; the rest is
+    # indels + repeat regions a mapping-based SNP-only call cannot see).
+    max_dp: 150
+
+# cellsnp-lite read filters. min_mapq is ALSO used by filter_bam_uniq to
+# pre-filter the BAM -- the two must stay equal (see that rule's docstring).
+cell_snp:
+  default:
+    min_mapq: 20
+
+# Stage 3 — cell QC thresholds
 cell_qc:
-  # Genotype call thresholds (per-marker AF cutoffs)
-  ref_low: 0.2       # alt_ratio < this -> REF call (genotype 0)
-  alt_high: 0.8      # alt_ratio > this -> ALT call (genotype 1)
-  # Cell quality filters (primary tier)
-  min_total_markers: 2500
-  min_per_chrom_markers: 100
-  max_switch_rate: 0.09
+  default:
+    ref_low: 0.2            # alt_ratio < this -> REF call (genotype 0)
+    alt_high: 0.8           # alt_ratio > this -> ALT call (genotype 1)
+    min_total_markers: 2500
+    min_per_chrom_markers: 100
+    max_switch_rate: 0.09
+
+  Cuscuta_epithymum:
+    # PINNED: reported figures.
+    ref_low: 0.2
+    alt_high: 0.8
+    min_total_markers: 2500
+    min_per_chrom_markers: 100
+    max_switch_rate: 0.09
+
+  Spondias_tuberosa:
+    # Set 2026-08-04 from switch_diagnostics on 1,471,619 markers (max_dp=150).
+    # 8,497 cells: median 531 markers/cell, DP mean 1.20 (89.5% single-read),
+    # switch-rate distribution bimodal -- noise mode at ~0.26, clean haploid
+    # shoulder at 0.02-0.10. Allele ratios peak at 0/1 = genuine haploid signal.
+    # (800, 0.09) keeps 179 cells; 92.4% of their 2,864 cell x chromosome slots
+    # carry >=40 markers. vs Cuscuta 90 cells x 7 chr = 630 chrom-observations,
+    # this gives 2,646 -- more sampling, ~5x coarser per-chromosome density.
+    ref_low: 0.2
+    alt_high: 0.8
+    min_total_markers: 800
+    min_per_chrom_markers: 40
+    max_switch_rate: 0.09
 
 
-
-# Stage 3d CO calling parameters (Meng's defaults for Rhynchospora)
+# Stage 3d — CO calling (sliding-block)
 co_calling:
-  cell_markers: 2500    # match upstream cell selection threshold
-  block_size: 2000000   # 2 Mb min block size
-  marker_num: 23         # min markers per block. History: 8 -> 50 -> 30 -> 23. 23 = value used for reported Cuscuta figures (373 COs, nu=2.40). Lower catches more close DCOs but risks noise.
+  default:
+    cell_markers: 2500      # keep equal to cell_qc.min_total_markers
+    block_size: 2000000     # 2 Mb min block size
+    marker_num: 23          # min markers per block
+
+  Cuscuta_epithymum:
+    # PINNED: history 8 -> 50 -> 30 -> 23. 23 produced the reported figures
+    # (373 COs, nu=2.40). Lower catches more close DCOs but risks noise.
+    cell_markers: 2500
+    block_size: 2000000
+    marker_num: 23
+
+  Spondias_tuberosa:
+    # 16 chromosomes ~17 Mb each; median 103 markers/chr in passing cells
+    # (~6 markers/Mb). Cuscuta's 2 Mb / 23 markers assumed ~3x this density and
+    # would reject most Spondias chromosomes. 3 Mb blocks hold ~18 markers at
+    # median density. marker_num swept 2026-08-04: 3/4/5/6/8 give total map
+    # 1169/1165/1158/1152/1132 cM -- 3.2% spread over a 2.7x parameter change,
+    # so map length is data-driven here, not threshold-driven. 4 chosen mid-range.
+    # (block_size IS consequential: 3Mb -> 1Mb moved 549 -> 1165 cM, see above.)
+    cell_markers: 800      # must equal cell_qc.min_total_markers
+    # block_size 3Mb blanked the terminal 3Mb of every chromosome (a CO needs a
+    # supported block BOTH sides): 0 COs called within 3Mb of any chromosome end,
+    # hard edge at exactly 3Mb. On 17Mb chromosomes that hid 35% of the sequence,
+    # concentrated distally where COs occur -> 15/16 chromosomes fell below the
+    # 50 cM obligate-CO floor. 1Mb leaves ~12% blanked at ~10 markers/Mb in the
+    # selected cells (median 2809 markers / 16 chr).
+    block_size: 1000000
+    marker_num: 4
+
+
+# ---------------------------------------------------------------------------
+# Global plotting params (genome-agnostic; no per-species blocks)
+# ---------------------------------------------------------------------------
 
 # Stage 4 — recombination landscape plotting
 landscape:
@@ -34,8 +120,16 @@ landscape:
   coc_interval_mb: 5    # interval size for CoC binning (Mb)
   n_boot: 500           # bootstrap iterations for CIs
 
-
 # Stage 5 — composite landscape figure
 composite:
   win_mb: 5         # sliding window size for all density tracks (Mb)
   step_mb: 0.5      # sliding step (Mb)
+
+# Stage 1b - rRNA array exclusion from the marker set.
+# flank_bp absorbs reads overhanging annotated features.
+# merge_gap_bp closes intergenic spacers inside tandem arrays
+# (Spondias 45S period is 11154 bp; spacers ~1318 bp).
+rrna:
+  kingdom: euk
+  flank_bp: 2000
+  merge_gap_bp: 3000
