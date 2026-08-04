@@ -52,3 +52,7 @@ EOF
 # Ignore the whole tree, but keep the curated pollen marker FASTA (small, hand-built input).
 resources/
 
+
+# throwaway diagnostics
+diag/
+run_*.log
