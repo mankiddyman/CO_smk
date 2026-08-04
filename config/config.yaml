@@ -51,7 +51,7 @@ cell_qc:
     ref_low: 0.2            # alt_ratio < this -> REF call (genotype 0)
     alt_high: 0.8           # alt_ratio > this -> ALT call (genotype 1)
     min_total_markers: 2500
-    min_per_chrom_markers: 100
+    min_per_chrom_markers: 40
     max_switch_rate: 0.09
 
   Cuscuta_epithymum:
@@ -73,7 +73,15 @@ cell_qc:
     ref_low: 0.2
     alt_high: 0.8
     min_total_markers: 800
-    min_per_chrom_markers: 40
+    # min_per_chrom_markers swept 2026-08-04 (15/20/25/30/40):
+    #   cells 177/170/158/140/110, total map 1091/1102/1111/1129/1165 cM,
+    #   chromosomes below the 50 cM obligate-CO floor 2/2/2/1/1.
+    # Map length is stable (6.4% across a 2.7x change) while cell count moves
+    # 61%, so relaxing buys precision cheaply -- but at <=25 a second
+    # chromosome drops below the floor (marker-poor cells count in the
+    # denominator without contributing detectable COs). 30 = most cells
+    # without a new floor violation.
+    min_per_chrom_markers: 30
     max_switch_rate: 0.09
 
 
