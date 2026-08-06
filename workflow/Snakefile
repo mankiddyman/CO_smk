@@ -702,6 +702,9 @@ rule co_calling:
         cell_markers = lambda w: param_for(w.sample, "co_calling", "cell_markers"),
         block_size = lambda w: param_for(w.sample, "co_calling", "block_size"),
         marker_num = lambda w: param_for(w.sample, "co_calling", "marker_num"),
+        base_af   = lambda w: param_for(w.sample, "co_calling", "base_af"),
+        window_af = lambda w: param_for(w.sample, "co_calling", "window_af"),
+        genotype  = lambda w: param_for(w.sample, "co_calling", "genotype"),
     shell:
         r"""
         mkdir -p {params.out_dir}
@@ -712,6 +715,9 @@ co_calling parameters:
   cell_markers (-c): {params.cell_markers}
   block_size   (-s): {params.block_size}
   marker_num   (-n): {params.marker_num}
+  baseAF:            {params.base_af}
+  windowAF:          {params.window_af}
+  genotype:          {params.genotype}
   threads:           {threads}
 EOF
 
@@ -727,6 +733,9 @@ EOF
                     --cell_markers {params.cell_markers} \
                     --block_size {params.block_size} \
                     --marker_num {params.marker_num} \
+                    --baseAF {params.base_af} \
+                    --windowAF {params.window_af} \
+                    --genotype {params.genotype} \
                     >> {log} 2>&1
             ' _ {{}}
 

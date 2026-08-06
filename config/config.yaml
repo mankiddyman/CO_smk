@@ -139,6 +139,35 @@ co_calling:
     cell_markers: 2500      # keep equal to cell_qc.min_total_markers
     block_size: 2000000     # 2 Mb min block size
     marker_num: 23          # min markers per block
+    # Genotype-smoothing thresholds in hapCO_identification.R. These were
+    # script defaults (inherited from the Rhynchospora original) and were not
+    # exposed until 2026-08-06.
+    #  base_af   : neighbourhood consensus (adj=2, i.e. 4 neighbours). If the
+    #              neighbour ALT fraction is >1-base_af or <base_af, the marker
+    #              is overwritten with the consensus; otherwise its own call is
+    #              kept. LOWER = stronger consensus required before overriding.
+    #  window_af : second pass. Markers whose neighbourhood fraction falls in
+    #              [window_af, 1-window_af] are REVERTED to their raw call,
+    #              protecting genuinely ambiguous regions from smoothing.
+    #              HIGHER = narrower band = more smoothing retained.
+    #  genotype  : INERT at this depth. After both smoothing passes column 8
+    #              holds only 0 or 1, so any value in (0,0.5) partitions
+    #              identically -- verified 0.1/0.2/0.45 all give 11 COs on a
+    #              test cell. Exposed for reportability only.
+    # SWEPT 2026-08-06, 3x3 grid base_af {0.2,0.3,0.4} x window_af {0.3,0.4,0.5}:
+    #   base_af 0.2 -> 1699 COs, 1110 cM, 3 chromosomes BELOW the 50 cM floor
+    #   base_af 0.3 -> 1740 COs, 1137 cM, 0 below floor
+    #   base_af 0.4 -> 1737-1747 COs, 1135-1142 cM, 0 below floor
+    #   window_af had NO effect at any base_af.
+    # window_af is inert because win_af is computed over 4 neighbours and can
+    # only be 0/0.25/0.5/0.75/1; the revert band [window_af, 1-window_af]
+    # catches exactly the value 0.5 for any window_af in (0.25, 0.5].
+    # base_af 0.2 is excluded by the obligate-CO floor. 0.3 vs 0.4 differ by
+    # 0.4% in map length with identical median CO interval width (359 kb), so
+    # 0.3 retained (script default, satisfies the floor, stable).
+    base_af: 0.3
+    window_af: 0.4
+    genotype: 0.2
 
   Cuscuta_epithymum:
     # PINNED: history 8 -> 50 -> 30 -> 23. 23 produced the reported figures
