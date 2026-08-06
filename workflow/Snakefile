@@ -229,7 +229,7 @@ rule cell_calling:
     params:
         matrix_dir = lambda w: f"results/starsolo/{w.sample}/Solo.out/GeneFull/raw",
         out_dir = lambda w: f"results/cells/{w.sample}",
-        default_lower = 300,
+        default_lower = lambda w: param_for(w.sample, "cell_calling", "default_lower"),
     shell:
         """
         Rscript workflow/scripts/cell_calling.R \

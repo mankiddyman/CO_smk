@@ -39,11 +39,50 @@ marker_filters:
     # indels + repeat regions a mapping-based SNP-only call cannot see).
     max_dp: 150
 
+# STAR alignment params. NOT YET APPLIED to the current Spondias BAM -- setting
+# alignIntronMax requires rebuilding the index and realigning 935M reads, which
+# invalidates the BAM, cellsnp and everything downstream. Apply at the NEXT
+# alignment. Recorded here so the value is version-controlled with its evidence.
+#
+# alignIntronMax: STAR default is 0 = derived from (2^winBinNbits)*
+# winAnchorDistNbins = 589,824 bp, a mammal-scale figure. Measured 2026-08-05 on
+# the MAPQ>=20 BAM (2% sample, 539,048 N gaps) vs the Helixer annotation
+# (121,873 introns):
+#            p50    p99      p99.9      max      >20kb
+#   annot    177    2,881    8,249      19,287   0
+#   observed 201    3,570    229,194    766,661  1,600 (0.297%)
+# The two agree to p99 then diverge 28x. The observed distribution is BIMODAL:
+# real introns to ~10kb, a valley, then a separate artefact population from
+# ~50kb to the 590kb cap. 20000 sits in the valley, above the largest annotated
+# intron, and removes the artefact population at zero cost to real introns.
+star:
+  default:
+    align_intron_max: 20000
+    # sjdbOverhang should be read_length-1; reads are 90bp -> 89 (currently 99).
+    # Harmless (over-long junction sequences waste a little index memory but
+    # lose no sensitivity); fix at the next index build.
+    sjdb_overhang: 89
+
 # cellsnp-lite read filters. min_mapq is ALSO used by filter_bam_uniq to
 # pre-filter the BAM -- the two must stay equal (see that rule's docstring).
 cell_snp:
   default:
     min_mapq: 20
+
+# Stage 2 - cell calling (EmptyDrops/knee)
+# default_lower: UMI floor below which barcodes are treated as ambient. Was
+# hardcoded 300 in the rule until 2026-08-05.
+cell_calling:
+  default:
+    # Swept 2026-08-05 (100/300/500/1000 -> 8919/8497/6285/3819 barcodes called):
+    # final result IDENTICAL in all four (140 cells, 1581 COs, 1129 cM). The
+    # cell_qc filters (min_total_markers 800, min_per_chrom 30, switch <=0.09)
+    # are strictly more stringent than any of these thresholds, so they subsume
+    # it -- every qualifying cell is already in the lower=1000 set. The knee is
+    # soft (knee 674, inflection 442, no plateau) as expected for dehydrated,
+    # transcriptionally quiescent mature pollen, but that softness is
+    # inconsequential here.
+    default_lower: 300
 
 # Stage 3 — cell QC thresholds
 cell_qc:
@@ -82,7 +121,16 @@ cell_qc:
     # denominator without contributing detectable COs). 30 = most cells
     # without a new floor violation.
     min_per_chrom_markers: 30
-    max_switch_rate: 0.09
+    # Swept 2026-08-05 (0.05/0.07/0.09/0.12):
+    #   cells 105/136/140/153, COs/cell 11.40/11.27/11.29/11.37,
+    #   total 1140/1127/1129/1137 cM, chromosomes below 50 cM 3/1/1/0.
+    # COs/cell is FLAT across the range -> cells admitted at looser thresholds
+    # contribute crossovers at the same rate, i.e. they are not noisier. 0.05 is
+    # actively worse (fewer cells, 3 floor violations). 0.12 chosen: most cells,
+    # no floor violations. The switch-rate distribution is bimodal (noise mode
+    # ~0.26, clean haploid shoulder 0.01-0.10) so 0.12 sits just above the clean
+    # population; the flat COs/cell shows this does not admit contamination.
+    max_switch_rate: 0.12
 
 
 # Stage 3d — CO calling (sliding-block)
@@ -114,6 +162,28 @@ co_calling:
     # concentrated distally where COs occur -> 15/16 chromosomes fell below the
     # 50 cM obligate-CO floor. 1Mb leaves ~12% blanked at ~10 markers/Mb in the
     # selected cells (median 2809 markers / 16 chr).
+    # block_size swept 2026-08-06 (250k/500k/1M/1.5M/2M):
+    #   COs 2193/1999/1740/1501/1266, map 1433/1307/1137/981/827 cM,
+    #   chromosomes below the 50 cM obligate-CO floor 0/0/0/6/10.
+    # NO PLATEAU -- map length rises monotonically as blocks shrink, so the
+    # sweep alone cannot select a value. Bounds:
+    #  UPPER: >=1.5Mb breaks the obligate-CO floor (6 and 10 chromosomes under
+    #    50 cM). One CO per bivalent makes 2 of 4 chromatids recombinant, so
+    #    0.5 CO/gamete = 50 cM is a hard physical minimum per chromosome.
+    #  LOWER: 250kb blocks hold ~2.5 markers at the observed ~10 markers/Mb,
+    #    below the marker_num=4 requirement, so only unusually dense blocks
+    #    qualify -> biased sample.
+    # 500kb vs 1Mb: 500kb finds 280 extra COs. These were tested and are NOT
+    # distinguishable from the 1719 shared calls -- marker support 7948 vs 8054
+    # (+/-500kb), interval width 347 vs 365 kb median, p90 1184 vs 1468 kb.
+    # They are NOT recovered blind-zone COs (median 2.13 Mb from a chromosome
+    # end, only 7.5% within 1Mb of an end) but rather COs in locally
+    # marker-poor interior patches that a 1Mb block cannot resolve.
+    # 1Mb retained as the conservative choice on marker density alone: ~10
+    # markers per block vs a requirement of 4, whereas 500kb gives ~5 -- a
+    # margin of one at mean DP 1.20, where 89.5% of genotype calls rest on a
+    # single read. REPORT THE SENSITIVITY (1137 cM at 1Mb, 1307 at 500kb,
+    # 981 at 1.5Mb); all are lower bounds since CO detection has not saturated.
     block_size: 1000000
     marker_num: 4
 
