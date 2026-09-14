@@ -56,3 +56,9 @@ resources/
 # throwaway diagnostics
 diag/
 run_*.log
+
+# QC battery outputs (regenerable)
+qc/
+
+# QC battery outputs (regenerable)
+qc/
