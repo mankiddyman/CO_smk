@@ -80,8 +80,17 @@ rule star_index:
     log: "logs/star_index/{sample}.log"
     benchmark: "benchmarks/star_index/{sample}.tsv"
     threads: 16
-    resources: mem_mb=64000, runtime=240
+    resources:
+        mem_mb  = lambda w: param_for(w.sample, "star", "index_mem_mb"),
+        runtime = lambda w: param_for(w.sample, "star", "index_runtime"),
     conda: "envs/star.yaml"
+    params:
+        # min(14, log2(genome)/2 - 1). STAR pre-indexes every k-mer prefix of
+        # this length, so the table is 4^N: too large wastes memory on a small
+        # genome, too small makes STAR scan more suffix-array positions per
+        # seed. 13 suits ~0.3-1 Gb; 14 is the ceiling, for >1 Gb.
+        sa_nbases = lambda w: param_for(w.sample, "star", "sa_index_nbases"),
+        sjdb_overhang = lambda w: param_for(w.sample, "star", "sjdb_overhang"),
     shell:
         """
         mkdir -p {output[0]}
@@ -90,8 +99,8 @@ rule star_index:
              --genomeDir {output[0]} \
              --genomeFastaFiles {input.fasta} \
              --sjdbGTFfile {input.gtf} \
-             --sjdbOverhang 99 \
-             --genomeSAindexNbases 13 \
+             --sjdbOverhang {params.sjdb_overhang} \
+             --genomeSAindexNbases {params.sa_nbases} \
              > {log} 2>&1
         touch {output.done}
         """
@@ -269,7 +278,9 @@ rule hifi_align:
     """Align HiFi reads to the assembly. Run once per sample."""
     input:
         fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
-        hifi  = lambda w: samples.loc[w.sample, "hifi_reads"],
+        # ";"-separated list (repo convention). minimap2 accepts several
+        # read files, and {input.hifi} expands a list space-separated.
+        hifi  = lambda w: _split_lanes(samples.loc[w.sample, "hifi_reads"]),
     output:
         bam = "results/markers/{sample}/hifi.bam",
         bai = "results/markers/{sample}/hifi.bam.bai",
@@ -277,7 +288,8 @@ rule hifi_align:
     threads: 16
     resources:
         mem_mb = 64000,
-        runtime = 180,  # 3h — was 28min actual for hap1
+        runtime = 2880,  # 48h. 180 was calibrated on Cuscuta (470 Mb, one HiFi
+                         # file); Drosera paradoxa is 2.17 Gb with 3 files.
     conda: "envs/markers.yaml"
     shell:
         """
@@ -541,6 +553,191 @@ rule filter_bam_uniq:
             -o {output.bam} {input.bam} 2> {log}
         samtools index -@ {threads} {output.bam} 2>> {log}
         echo "records kept: $(samtools view -c -@ 4 {output.bam})" >> {log}
+        """
+
+
+rule qc_01_markers:
+    """QC stage 01: characterise the het-SNP marker set.
+
+    Runs after filter_markers (and rrna_blacklist, if present) so it sees the
+    marker set actually used downstream. Staged deliberately: the Spondias
+    max_dp bug was visible HERE but was not caught until CO calling days later.
+    """
+    input:
+        raw_vcf     = "results/markers/{sample}/hifi_raw.vcf.gz",
+        markers_vcf = "results/markers/{sample}/markers.vcf.gz",
+        fai         = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+    output:
+        summary = "qc/{sample}/01_markers/summary.tsv",
+        flags   = "qc/{sample}/01_markers/flags.txt",
+        per_chrom = "qc/{sample}/01_markers/per_chrom.tsv",
+        depth   = "qc/{sample}/01_markers/depth.png",
+        ratio   = "qc/{sample}/01_markers/allele_ratio.png",
+        qual    = "qc/{sample}/01_markers/qual.png",
+        spacing = "qc/{sample}/01_markers/spacing.png",
+        density = "qc/{sample}/01_markers/per_chrom.png",
+    log: "logs/qc_01_markers/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 16000,
+        runtime = 60,
+    conda: "envs/qc.yaml"
+    params:
+        out_dir       = lambda w: f"qc/{w.sample}/01_markers",
+        min_dp        = lambda w: param_for(w.sample, "marker_filters", "min_dp"),
+        max_dp        = lambda w: param_for(w.sample, "marker_filters", "max_dp"),
+        min_qual      = lambda w: param_for(w.sample, "marker_filters", "min_qual"),
+        min_alt_ratio = lambda w: param_for(w.sample, "marker_filters", "min_alt_ratio"),
+        max_alt_ratio = lambda w: param_for(w.sample, "marker_filters", "max_alt_ratio"),
+        block_size    = lambda w: param_for(w.sample, "co_calling", "block_size"),
+    shell:
+        """
+        mkdir -p "$(dirname {log})" {params.out_dir}
+        python3 workflow/scripts/qc/qc_01_markers.py \
+            --sample {wildcards.sample} \
+            --raw_vcf {input.raw_vcf} \
+            --markers_vcf {input.markers_vcf} \
+            --fai {input.fai} \
+            --out_dir {params.out_dir} \
+            --min_dp {params.min_dp} \
+            --max_dp {params.max_dp} \
+            --min_qual {params.min_qual} \
+            --min_alt_ratio {params.min_alt_ratio} \
+            --max_alt_ratio {params.max_alt_ratio} \
+            --block_size {params.block_size} \
+            > {log} 2>&1
+        """
+
+
+rule qc_02_cells:
+    """QC stage 02: alignment, cell calling, and per-cell genotypes.
+
+    NOTE the BAM input is the RAW StarSolo BAM, not Aligned.uniq.bam. The
+    COVERAGE_HOTSPOT check looks for collapsed repeats, whose reads are MAPQ 0
+    -- on the filtered BAM the Spondias rDNA array showed 94x on the wrong
+    chromosome; on the raw BAM it shows 8143x at chr13:0-50000.
+    """
+    input:
+        star_log        = "results/starsolo/{sample}/Log.final.out",
+        matrix          = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
+        barcodes_called = "results/cells/{sample}/barcodes_called.tsv",
+        cell_qc_summary = "results/cells/{sample}/qc_summary.tsv",
+        dp              = "results/snps/{sample}/cellSNP.tag.DP.mtx",
+        switches        = "results/cell_qc/{sample}/switches.tsv",
+        bam             = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
+        fai             = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+    output:
+        summary  = "qc/{sample}/02_cells/summary.tsv",
+        flags    = "qc/{sample}/02_cells/flags.txt",
+        hotspots = "qc/{sample}/02_cells/coverage_hotspots.tsv",
+        knee     = "qc/{sample}/02_cells/knee.png",
+        dp_png   = "qc/{sample}/02_cells/dp.png",
+        ratio    = "qc/{sample}/02_cells/allele_ratio_cells.png",
+        switch   = "qc/{sample}/02_cells/switch_rate.png",
+        markers  = "qc/{sample}/02_cells/markers_per_cell.png",
+        coverage = "qc/{sample}/02_cells/coverage.png",
+    log: "logs/qc_02_cells/{sample}.log"
+    threads: 4
+    resources:
+        mem_mb = 32000,
+        runtime = 120,
+    conda: "envs/qc.yaml"
+    params:
+        out_dir     = lambda w: f"qc/{w.sample}/02_cells",
+        matrix_dir  = lambda w: f"results/starsolo/{w.sample}/Solo.out/GeneFull/raw",
+        snps_dir    = lambda w: f"results/snps/{w.sample}",
+        min_total   = lambda w: param_for(w.sample, "cell_qc", "min_total_markers"),
+        min_chrom   = lambda w: param_for(w.sample, "cell_qc", "min_per_chrom_markers"),
+        max_sr      = lambda w: param_for(w.sample, "cell_qc", "max_switch_rate"),
+        lower       = lambda w: param_for(w.sample, "cell_calling", "default_lower"),
+        min_mapq    = lambda w: param_for(w.sample, "cell_snp", "min_mapq"),
+    shell:
+        """
+        mkdir -p "$(dirname {log})" {params.out_dir}
+        python3 workflow/scripts/qc/qc_02_cells.py \
+            --sample {wildcards.sample} \
+            --star_log {input.star_log} \
+            --matrix_dir {params.matrix_dir} \
+            --barcodes_called {input.barcodes_called} \
+            --cell_qc_summary {input.cell_qc_summary} \
+            --snps_dir {params.snps_dir} \
+            --switches {input.switches} \
+            --bam {input.bam} \
+            --fai {input.fai} \
+            --out_dir {params.out_dir} \
+            --min_total_markers {params.min_total} \
+            --min_per_chrom_markers {params.min_chrom} \
+            --max_switch_rate {params.max_sr} \
+            --default_lower {params.lower} \
+            --min_mapq {params.min_mapq} \
+            > {log} 2>&1
+        """
+
+
+rule qc_03_cos:
+    """QC stage 03: crossover calls, detection saturation, obligate-CO floor."""
+    input:
+        co_intervals      = "results/crossovers/{sample}/co_intervals.bed",
+        co_summary        = "results/crossovers/{sample}/co_summary.txt",
+        landscape_summary = "results/landscape/{sample}/landscape_summary.tsv",
+        switches          = "results/cell_qc/{sample}/switches.tsv",
+        good_cells        = "results/cell_qc/{sample}/good_cells.tsv",
+        fai               = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+    output:
+        summary   = "qc/{sample}/03_cos/summary.tsv",
+        flags     = "qc/{sample}/03_cos/flags.txt",
+        per_chrom = "qc/{sample}/03_cos/per_chrom.tsv",
+        sat       = "qc/{sample}/03_cos/saturation.png",
+        per_cell  = "qc/{sample}/03_cos/co_per_cell.png",
+        positions = "qc/{sample}/03_cos/co_positions.png",
+    log: "logs/qc_03_cos/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 16000,
+        runtime = 60,
+    conda: "envs/qc.yaml"
+    params:
+        out_dir    = lambda w: f"qc/{w.sample}/03_cos",
+        block_size = lambda w: param_for(w.sample, "co_calling", "block_size"),
+        marker_num = lambda w: param_for(w.sample, "co_calling", "marker_num"),
+    shell:
+        """
+        mkdir -p "$(dirname {log})" {params.out_dir}
+        python3 workflow/scripts/qc/qc_03_cos.py \
+            --sample {wildcards.sample} \
+            --co_intervals {input.co_intervals} \
+            --co_summary {input.co_summary} \
+            --landscape_summary {input.landscape_summary} \
+            --switches {input.switches} \
+            --good_cells {input.good_cells} \
+            --fai {input.fai} \
+            --out_dir {params.out_dir} \
+            --block_size {params.block_size} \
+            --marker_num {params.marker_num} \
+            > {log} 2>&1
+        """
+
+
+rule qc_report:
+    """Concatenate the three stages into one summary and flag list."""
+    input:
+        s1 = "qc/{sample}/01_markers/summary.tsv",
+        s2 = "qc/{sample}/02_cells/summary.tsv",
+        s3 = "qc/{sample}/03_cos/summary.tsv",
+        f1 = "qc/{sample}/01_markers/flags.txt",
+        f2 = "qc/{sample}/02_cells/flags.txt",
+        f3 = "qc/{sample}/03_cos/flags.txt",
+    output:
+        summary = "qc/{sample}/summary.tsv",
+        flags   = "qc/{sample}/flags.txt",
+    shell:
+        """
+        head -1 {input.s1} > {output.summary}
+        for f in {input.s1} {input.s2} {input.s3}; do tail -n +2 "$f" >> {output.summary}; done
+        : > {output.flags}
+        for f in {input.f1} {input.f2} {input.f3}; do grep -v '^#' "$f" >> {output.flags} || true; done
+        n=$(grep -c . {output.flags} || true)
+        echo "qc_report: {wildcards.sample} -- $n flags" >&2
         """
 
 

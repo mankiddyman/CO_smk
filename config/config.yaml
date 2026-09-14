@@ -58,10 +58,31 @@ marker_filters:
 star:
   default:
     align_intron_max: 20000
-    # sjdbOverhang should be read_length-1; reads are 90bp -> 89 (currently 99).
-    # Harmless (over-long junction sequences waste a little index memory but
-    # lose no sensitivity); fix at the next index build.
-    sjdb_overhang: 89
+    sa_index_nbases: 13     # min(14, log2(genome)/2 - 1); 13 suits ~0.3-1 Gb
+    sjdb_overhang: 99       # read_length - 1
+    index_mem_mb: 64000     # STAR index scales with genome size
+    index_runtime: 240
+
+  Drosera_binata:
+    sa_index_nbases: 13     # hap1 0.692 Gb -> formula gives 13
+    sjdb_overhang: 99       # R2 is 100 bp
+    index_mem_mb: 64000     # ~48 GB per Gb of genome, floored at 64 GB
+    index_runtime: 240
+
+  Drosera_paradoxa:
+    sa_index_nbases: 14     # hap1 2.174 Gb -> formula gives 14 (the ceiling)
+    sjdb_overhang: 99       # R2 is 100 bp
+    index_mem_mb: 110000    # 2.17 Gb genome; 64 GB is not enough
+    index_runtime: 600
+
+  # PINNED to what actually built the existing index. Spondias reads are 90 bp
+  # so 89 would be nominally correct, but the index was built at 99 and
+  # changing this value would trigger a rebuild, invalidating the BAM, cellsnp
+  # and the reported landscape (153 cells, 1740 COs, 1137 cM). The cost of 99
+  # is a little wasted index memory and no loss of sensitivity. Revisit only
+  # if Spondias is realigned from scratch.
+  Spondias_tuberosa:
+    sjdb_overhang: 99
 
 # cellsnp-lite read filters. min_mapq is ALSO used by filter_bam_uniq to
 # pre-filter the BAM -- the two must stay equal (see that rule's docstring).
