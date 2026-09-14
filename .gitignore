@@ -58,7 +58,7 @@ diag/
 run_*.log
 
 # QC battery outputs (regenerable)
-qc/
+/qc/
 
 # QC battery outputs (regenerable)
-qc/
+/qc/
