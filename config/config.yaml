@@ -39,6 +39,61 @@ marker_filters:
     # indels + repeat regions a mapping-based SNP-only call cannot see).
     max_dp: 150
 
+  Drosera_binata:
+    # Audited 2026-09-15. Values IDENTICAL to `default:` -- this block exists so
+    # they are binata's OWN, with evidence, rather than Cuscuta's pinned tuning
+    # inherited silently by param_for(). Workings: docs/binata_marker_audit.md
+    #
+    # Sample Dbinata_hap1 / refs/Drosera_binata_hap1 (691.8 Mb, 16 chr).
+    # ONE PLANT, TWO MOVIES -- not a pool. m84191_241130_003922_s3 ~74% of depth,
+    # m64074_230718_093436 ~26%; ALT reads track depth share in both clean and
+    # low-AF classes (74.5/74.0 and 74.1/73.3).
+    min_dp: 10
+    max_dp: 80
+    # Median DP at het SNPs 51 (q1 32, q3 80, p90 126). 80 = 1.6x median, ABOVE
+    # the diploid peak. NOT the Spondias failure, where 80 sat BELOW a median of
+    # 91. The 24.9% max_dp attrition is the high-depth repeat tail, not the peak.
+    min_qual: 30
+    # Near-inert: QUAL saturates ~220 for almost every call. A mismapped site
+    # genuinely has two alleles present, so the caller is right to be confident.
+    # Only depth and ALT ratio separate real from artefact here.
+    min_alt_ratio: 0.3
+    max_alt_ratio: 0.7
+    # Raw AF is bimodal: clean peak at 0.5 plus a large ASYMMETRIC low shelf.
+    # Mechanism is reference bias localised to divergent regions -- the reference
+    # IS hap1, so where hap2 is too divergent to map its reads are lost, and
+    # those are the ALT-carrying reads. Can only push AF down, never up. Hence
+    # the shelf ANTI-correlates with depth (47.2% of sites <0.3 at DP 10-25 vs
+    # 22.8% above DP 250) and is 3x worse outside exons (32.9% vs 10.3%).
+    #
+    # Validated against minimap2 asm20 hap1-vs-hap2. Raw calls confirmed by an
+    # assembly difference at same position AND alleles, alignable sequence only.
+    # The 0.40-0.70 plateau (87.6%) is the alignment's own sensitivity ceiling;
+    # est. real divides through by it:
+    #     <0.10           62,315   9.1%  ->  10% real
+    #     0.10-0.20    1,030,823  14.4%  ->  16%
+    #     0.20-0.30    1,055,814  39.1%  ->  45%
+    #     0.30-0.40    1,385,057  70.6%  ->  81%
+    #     0.40-0.60    3,867,113  87.5%  ->  ceiling
+    #     0.60-0.70      820,620  87.6%  ->  ceiling
+    #     0.70-0.80      309,868  84.1%  ->  96%
+    #     >0.80           99,329  77.6%  ->  89%
+    #
+    # 0.3 is where the trade flips: 0.20-0.30 buys ~471k real for ~585k artefact
+    # (worse than 1:1); 0.30-0.40 is ~1,116k real for ~269k (better than 4:1).
+    # Artefacts cluster spatially in divergent sequence, so they give CORRELATED
+    # wrong genotypes across cells -- false COs, not noise.
+    #
+    # 0.7 KEPT, deliberately not raised to 0.8 although 0.70-0.80 is ~96% real:
+    # gain is ~260k markers on 10.84M (2.4%) for a species nowhere near
+    # marker-limited, and Cuscuta and Spondias both run 0.7. Identical
+    # ascertainment across the three species beats 2.4% yield.
+    #
+    # Result: 10,843,674 markers, 15,662/Mb, median spacing 13 bp, 0 gaps >
+    # block_size, 1.2x max/min density across chromosomes, implied het 1.5675%
+    # genome-wide (1.68% within alignable sequence).
+
+
 # STAR alignment params. NOT YET APPLIED to the current Spondias BAM -- setting
 # alignIntronMax requires rebuilding the index and realigning 935M reads, which
 # invalidates the BAM, cellsnp and everything downstream. Apply at the NEXT
