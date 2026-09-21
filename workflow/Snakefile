@@ -1152,3 +1152,59 @@ rule composite_landscape:
             --step_mb {params.step_mb} \
             > {log} 2>&1
         """
+
+
+
+# ---------------------------------------------------------------- haplotype alignment
+import os
+
+
+def hap_source(w):
+    """Dual-haplotype assembly the published hap1 reference was cut from.
+
+    Read from the reference's MANIFEST.txt (source_fasta), so hap2 always
+    comes from the same assembly as the hap1 the markers are called on.
+    """
+    ref_dir = os.path.dirname(samples.loc[w.sample, "assembly_fasta"])
+    with open(os.path.join(ref_dir, "MANIFEST.txt")) as fh:
+        for line in fh:
+            if line.startswith("source_fasta:"):
+                return line.split(":", 1)[1].strip()
+    raise ValueError(f"{ref_dir}/MANIFEST.txt has no source_fasta line")
+
+
+rule hap_align:
+    """hap2 aligned onto hap1 (the published reference), whole genome, base-level.
+
+    One PAF feeds the marker audit (assembly SNPs via paftools call, which
+    needs --cs; alignable regions) and SyRI's rearrangement calls (--eqx).
+    Nothing in the crossover chain reads it, so it can never trigger a rerun.
+    asm20, not asm5: at binata's ~2.8% divergence asm5 aligned 31.9% of hap2
+    against asm20's 59.2% (marker audit, 2026-09-15). -K4G loads all of hap2
+    in one batch so threads run across chromosomes (one thread per sequence).
+    """
+    input:
+        hap1 = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        dual = hap_source,
+    output:
+        hap2 = "results/hap_align/{sample}/hap2.fa",
+        paf = "results/hap_align/{sample}/hap2_on_hap1.paf",
+    log:
+        "logs/hap_align/{sample}.log",
+    benchmark:
+        "benchmarks/hap_align/{sample}.tsv",
+    threads: 24
+    resources:
+        # scheduling token under hpc09's strict overcommit: ~30 MB per Mb of hap1
+        mem_mb = lambda w: max(20000, int(30 * os.path.getsize(samples.loc[w.sample, "assembly_fasta"]) / 1e6)),
+        runtime = 720,
+    conda:
+        "envs/hap_align.yaml"
+    shell:
+        r"""
+        awk '/^>/ {{keep = ($1 ~ /_hap2$/)}} keep' {input.dual} > {output.hap2} 2> {log}
+        echo "hap2 sequences: $(grep -c '^>' {output.hap2})" >> {log}
+        test -s {output.hap2}
+        minimap2 -x asm20 -c --eqx --cs -t {threads} -I8G -K4G \
+            {input.hap1} {output.hap2} > {output.paf} 2>> {log}
+        """
