@@ -226,6 +226,7 @@ rule starsolo_align:
     benchmark: "benchmarks/starsolo/{sample}.tsv"
     threads: 16
     resources:
+        bam_sort_threads = lambda w: resource_for(w.sample, "star", "bam_sort_threads"),
         mem_mb  = lambda w: resource_for(w.sample, "star", "align_mem_mb"),
         runtime = lambda w: resource_for(w.sample, "star", "align_runtime"),
     conda: "envs/star.yaml"
@@ -276,6 +277,7 @@ rule starsolo_align:
              --alignIntronMax {params.intron_max} \
              --outSAMmultNmax {params.sam_mult_nmax} \
              --limitBAMsortRAM {params.bam_sort_ram} \
+             --outBAMsortingThreadN {resources.bam_sort_threads} \
              --outSAMtype BAM SortedByCoordinate \
              --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
              --outFileNamePrefix {params.out_prefix} \
