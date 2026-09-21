@@ -22,6 +22,7 @@ marker_filters:
     min_qual: 30
     min_alt_ratio: 0.3
     max_alt_ratio: 0.7
+    gap_flag_bp: 2000000  # gaps longer than this are CO-blind; set per species, re-check against block_size at the co_calling gate
 
   Cuscuta_epithymum:
     _approved: "PINNED 2026-09-21 | produced the reported figures (373 COs, 90 cells, nu 2.40)"
@@ -31,6 +32,7 @@ marker_filters:
     min_qual: 30
     min_alt_ratio: 0.3
     max_alt_ratio: 0.7
+    gap_flag_bp: 2000000  # = co_calling.block_size its marker QC ran with (pinned, no params change)
 
   Spondias_tuberosa:
     _approved: "PINNED 2026-09-21 | recorded filter_markers params 2026-08-03: 0.3/0.7/10/150/30"
@@ -46,6 +48,7 @@ marker_filters:
     # Yields 1.47M markers = 0.53% het (86% of the k-mer estimate; the rest is
     # indels + repeat regions a mapping-based SNP-only call cannot see).
     max_dp: 150
+    gap_flag_bp: 1000000  # = co_calling.block_size its marker QC ran with (pinned, no params change)
 
   Drosera_binata:
     _approved: "2026-09-15 | docs/binata_marker_audit.md"
@@ -68,6 +71,7 @@ marker_filters:
     # Only depth and ALT ratio separate real from artefact here.
     min_alt_ratio: 0.3
     max_alt_ratio: 0.7
+    gap_flag_bp: 2000000  # = inherited block_size its marker QC ran with 2026-09-15: 0 gaps. Re-check against the chosen block_size at the co_calling gate
     # Raw AF is bimodal: clean peak at 0.5 plus a large ASYMMETRIC low shelf.
     # Mechanism is reference bias localised to divergent regions -- the reference
     # IS hap1, so where hap2 is too divergent to map its reads are lost, and
@@ -343,6 +347,7 @@ cell_qc:
 # Stage 3d — CO calling (sliding-block)
 co_calling:
   _template:
+    # !! marker QC flags gaps against marker_filters.gap_flag_bp, not this block_size -- re-check marker gaps against the chosen block_size before stamping
     # TEMPLATE -- never read by param_for(). Copy it when adding a species
     # and decide every value from that species' own data, then stamp it.
     cell_markers: 2500      # keep equal to cell_qc.min_total_markers

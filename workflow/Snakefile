@@ -651,7 +651,7 @@ rule qc_01_markers:
     max_dp bug was visible HERE but was not caught until CO calling days later.
     """
     input:
-        approved("marker_filters", "co_calling"),
+        approved("marker_filters"),
         raw_vcf     = "results/markers/{sample}/hifi_raw.vcf.gz",
         markers_vcf = "results/markers/{sample}/markers.vcf.gz",
         fai         = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
@@ -677,7 +677,7 @@ rule qc_01_markers:
         min_qual      = lambda w: param_for(w.sample, "marker_filters", "min_qual"),
         min_alt_ratio = lambda w: param_for(w.sample, "marker_filters", "min_alt_ratio"),
         max_alt_ratio = lambda w: param_for(w.sample, "marker_filters", "max_alt_ratio"),
-        block_size    = lambda w: param_for(w.sample, "co_calling", "block_size"),
+        block_size    = lambda w: param_for(w.sample, "marker_filters", "gap_flag_bp"),
     shell:
         """
         mkdir -p "$(dirname {log})" {params.out_dir}
