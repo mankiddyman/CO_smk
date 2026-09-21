@@ -1,0 +1,7 @@
+[INFO] Reading sites from results/snps/6303_B_hap1/cellSNP.base.vcf.gz
+[INFO] Reading barcodes from results/snps/6303_B_hap1/cellSNP.samples.tsv
+[INFO] 694537 sites x 6874 cells
+[INFO] Loading DP matrix...
+[INFO] Loading AD matrix...
+[INFO] Wrote chrom_map: 7 chromosomes
+[INFO] Done. Wrote 6874 per-cell files. See results/cell_data/6303_B_hap1/conversion_summary.txt.

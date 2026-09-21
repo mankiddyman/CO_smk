@@ -1,0 +1,71 @@
+================================================================================================
+Spondias_hap1 -- 18 rules with recorded metadata
+================================================================================================
+
+rule cell_calling   (2026-08-05; e.g. results/cells/Spondias_hap1/barcodes_called.tsv)
+   params   : 'results/cells/Spondias_hap1' | 'results/starsolo/Spondias_hap1/Solo.out/GeneFull/raw' | 300
+   shellcmd : Rscript workflow/scripts/cell_calling.R --matrix_dir results/starsolo/Spondias_hap1/Solo.out/GeneFull/raw --out_dir results/cells/Spondias_hap1 --sample Spondias_hap1 --default_lower 300 --fdr 0.001 --niters 10000 > logs/cell_calling/Spondias_hap1.log 2>&1
+
+rule cell_snp_counting   (2026-08-05; e.g. results/snps/Spondias_hap1/cellSNP.samples.tsv)
+   params   : 'results/snps/Spondias_hap1' | 20
+   shellcmd : mkdir -p results/snps/Spondias_hap1 cellsnp-lite -s results/starsolo/Spondias_hap1/Aligned.uniq.bam -b results/cells/Spondias_hap1/barcodes_called.tsv -R results/markers/Spondias_hap1/markers.vcf.gz -O results/snps/Spondias_hap1 -p 16 --maxDEPTH 100000 --minMAPQ 20 --minLEN 30 --minCOUNT 1 --minMAF 0 --cellTAG CB --UMItag UB --gzip > logs/cell_snp_counting/Spondias_hap1.log 2>&1
+
+rule cellsnp_to_per_cell   (2026-08-05; e.g. results/cell_data/Spondias_hap1/chrom_map.tsv)
+   params   : 'results/cell_data/Spondias_hap1' | 'results/snps/Spondias_hap1' | 50
+   shellcmd : python workflow/scripts/cellsnp_to_per_cell.py --cellsnp_dir results/snps/Spondias_hap1 --fai /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta.fai --out_dir results/cell_data/Spondias_hap1 --min_markers 50 > logs/cellsnp_to_per_cell/Spondias_hap1.log 2>&1
+
+rule co_aggregate   (2026-08-06; e.g. results/crossovers/Spondias_hap1/co_diagnostics.pdf)
+   params   : 'results/crossovers/Spondias_hap1' | 'results/crossovers/Spondias_hap1/per_cell'
+   shellcmd : Rscript workflow/scripts/co_aggregate.R --co_dir results/crossovers/Spondias_hap1/per_cell --good_cells results/cell_qc/Spondias_hap1/good_cells.tsv --chrom_map results/cell_data/Spondias_hap1/chrom_map.tsv --out_dir results/crossovers/Spondias_hap1 > logs/co_aggregate/Spondias_hap1.log 2>&1
+
+rule co_calling   (2026-08-06; e.g. results/crossovers/Spondias_hap1/.done)
+   params   : 'results/cell_data/Spondias_hap1' | 'results/crossovers/Spondias_hap1/per_cell' | 0.2 | 0.3 | 0.4 | 1000000 | 4 | 800
+   shellcmd : mkdir -p results/crossovers/Spondias_hap1/per_cell rm -f results/crossovers/Spondias_hap1/per_cell/*_co_pred.txt results/crossovers/Spondias_hap1/per_cell/*_co_block_pred.txt results/crossovers/Spondias_hap1/per_cell/*_co.pdf # Document parameters used cat > results/crossovers/Spondias_hap1/co_calling_params.txt <<EOF co_calling parameters: cell_markers (-c): 800 block_size (-s): 1000000 marker_num (-n): 4 baseAF: 0.3 windowAF: 0.4 genotype: 0.2 threads: 8 EOF # Run R script per cell, parallelized via xargs cat results/cell_qc/Spondias_hap1/good_cells.tsv | xargs -I {} -P 8 -n 1 \ bash -c ' bc="$1" Rscript workflow/scripts/hapCO_identification.R \ --input results/cell_data/Spondias_hap1/${bc}.tsv \ --prefix "${bc}" \ --chrom_map results/cell_data/Spondias_hap1/chrom_map.tsv \ --outpath results/crossovers/Spondias_hap1/per_cell \ --cell_markers 800 \ --block_size 1000000 \ --marker_num 4  ...
+
+rule filter_markers   (2026-08-03; e.g. results/markers/Spondias_hap1/filter_summary.txt)
+   params   : 0.3 | 0.7 | 10 | 150 | 30
+   shellcmd : # Filter: biallelic SNPs, het, DP range, QUAL, allele ratio # bcftools expression: INFO and FORMAT fields accessed by name bcftools view \ -m2 -M2 -v snps \ -g het \ -e 'QUAL < 30 || FMT/DP < 10 || FMT/DP > 150 || (FMT/AD[0:1] / FMT/DP) < 0.3 || (FMT/AD[0:1] / FMT/DP) > 0.7' \ -Oz -o results/markers/Spondias_hap1/markers.vcf.gz results/markers/Spondias_hap1/hifi_raw.vcf.gz 2> logs/filter_markers/Spondias_hap1.log bcftools index -t results/markers/Spondias_hap1/markers.vcf.gz 2>> logs/filter_markers/Spondias_hap1.log # --- Exclude markers inside rRNA arrays (see rule rrna_blacklist) --- # Done here, before the TSV export, so markers.tsv and filter_summary.txt # both report the post-exclusion set. mv results/markers/Spondias_hap1/markers.vcf.gz results/markers/Spondias_hap1/markers.vcf.gz.prerrna bcftools view -T ^results/blacklist/Spondias_hap1/rrna_exclude.bed \ -Oz -o results/markers/Sp ...
+
+rule hifi_align   (2026-07-10; e.g. results/markers/Spondias_hap1/hifi.bam)
+   shellcmd : if [ ! -f /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta.fai ]; then samtools faidx /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta 2>> logs/hifi_align/Spondias_hap1.log fi minimap2 -t 16 -ax map-hifi /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/5502_HiFi/m64253e_220513_224501.hifi_reads.fasta.gz 2>> logs/hifi_align/Spondias_hap1.log | samtools sort -@ 4 -o results/markers/Spondias_hap1/hifi.bam - 2>> logs/hifi_align/Spondias_hap1.log samtools index results/markers/Spondias_hap1/hifi.bam 2>> logs/hifi_align/Spondias_hap1.log
+
+rule hifi_variants_merge   (2026-07-10; e.g. results/markers/Spondias_hap1/hifi_raw.vcf.gz)
+   shellcmd : bcftools concat -Oz -o results/markers/Spondias_hap1/hifi_raw.vcf.gz results/markers/Spondias_hap1/by_chrom/1.vcf.gz results/markers/Spondias_hap1/by_chrom/2.vcf.gz results/markers/Spondias_hap1/by_chrom/3.vcf.gz results/markers/Spondias_hap1/by_chrom/4.vcf.gz results/markers/Spondias_hap1/by_chrom/5.vcf.gz results/markers/Spondias_hap1/by_chrom/6.vcf.gz results/markers/Spondias_hap1/by_chrom/7.vcf.gz results/markers/Spondias_hap1/by_chrom/8.vcf.gz results/markers/Spondias_hap1/by_chrom/9.vcf.gz results/markers/Spondias_hap1/by_chrom/10.vcf.gz results/markers/Spondias_hap1/by_chrom/11.vcf.gz results/markers/Spondias_hap1/by_chrom/12.vcf.gz results/markers/Spondias_hap1/by_chrom/13.vcf.gz results/markers/Spondias_hap1/by_chrom/14.vcf.gz results/markers/Spondias_hap1/by_chrom/15.vcf.gz results/markers/Spondias_hap1/by_chrom/16.vcf.gz 2>> logs/hifi_variants_merge/Spondias_hap1.log bcftools  ...
+
+rule hifi_variants_per_chrom   (2026-07-10; e.g. results/markers/Spondias_hap1/by_chrom/5.vcf.gz.tbi)
+   shellcmd : mkdir -p results/markers/Spondias_hap1/by_chrom bcftools mpileup -f /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta -q 20 -Q 20 -a AD,DP -r 5 results/markers/Spondias_hap1/hifi.bam 2>> logs/hifi_variants_per_chrom/Spondias_hap1.5.log | bcftools call -m -v -Oz -o results/markers/Spondias_hap1/by_chrom/5.vcf.gz 2>> logs/hifi_variants_per_chrom/Spondias_hap1.5.log bcftools index -t results/markers/Spondias_hap1/by_chrom/5.vcf.gz 2>> logs/hifi_variants_per_chrom/Spondias_hap1.5.log
+
+rule qc_01_markers   (2026-08-06; e.g. qc/Spondias_hap1/01_markers/depth.png)
+   params   : 'qc/Spondias_hap1/01_markers' | 0.3 | 0.7 | 10 | 1000000 | 150 | 30
+   shellcmd : mkdir -p "$(dirname logs/qc_01_markers/Spondias_hap1.log)" qc/Spondias_hap1/01_markers python3 workflow/scripts/qc/qc_01_markers.py --sample Spondias_hap1 --raw_vcf results/markers/Spondias_hap1/hifi_raw.vcf.gz --markers_vcf results/markers/Spondias_hap1/markers.vcf.gz --fai /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta.fai --out_dir qc/Spondias_hap1/01_markers --min_dp 10 --max_dp 150 --min_qual 30 --min_alt_ratio 0.3 --max_alt_ratio 0.7 --block_size 1000000 > logs/qc_01_markers/Spondias_hap1.log 2>&1
+
+rule qc_02_cells   (2026-08-07; e.g. qc/Spondias_hap1/02_cells/allele_ratio_cells.png)
+   params   : 'qc/Spondias_hap1/02_cells' | 'results/snps/Spondias_hap1' | 'results/starsolo/Spondias_hap1/Solo.out/GeneFull/raw' | 0.12 | 20 | 30 | 300 | 800
+   shellcmd : mkdir -p "$(dirname logs/qc_02_cells/Spondias_hap1.log)" qc/Spondias_hap1/02_cells python3 workflow/scripts/qc/qc_02_cells.py --sample Spondias_hap1 --star_log results/starsolo/Spondias_hap1/Log.final.out --matrix_dir results/starsolo/Spondias_hap1/Solo.out/GeneFull/raw --barcodes_called results/cells/Spondias_hap1/barcodes_called.tsv --cell_qc_summary results/cells/Spondias_hap1/qc_summary.tsv --snps_dir results/snps/Spondias_hap1 --switches results/cell_qc/Spondias_hap1/switches.tsv --bam results/starsolo/Spondias_hap1/Aligned.sortedByCoord.out.bam --fai /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta.fai --out_dir qc/Spondias_hap1/02_cells --min_total_markers 800 --min_per_chrom_markers 30 --max_switch_rate 0.12 --default_lower 300 --min_mapq 20 > logs/qc_02_cells/Spondias_hap1.log 2>&1
+
+rule qc_03_cos   (2026-08-07; e.g. qc/Spondias_hap1/03_cos/flags.txt)
+   params   : 'qc/Spondias_hap1/03_cos' | 1000000 | 4
+   shellcmd : mkdir -p "$(dirname logs/qc_03_cos/Spondias_hap1.log)" qc/Spondias_hap1/03_cos python3 workflow/scripts/qc/qc_03_cos.py --sample Spondias_hap1 --co_intervals results/crossovers/Spondias_hap1/co_intervals.bed --co_summary results/crossovers/Spondias_hap1/co_summary.txt --landscape_summary results/landscape/Spondias_hap1/landscape_summary.tsv --switches results/cell_qc/Spondias_hap1/switches.tsv --good_cells results/cell_qc/Spondias_hap1/good_cells.tsv --fai /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta.fai --out_dir qc/Spondias_hap1/03_cos --block_size 1000000 --marker_num 4 > logs/qc_03_cos/Spondias_hap1.log 2>&1
+
+rule qc_report   (2026-08-07; e.g. qc/Spondias_hap1/flags.txt)
+   shellcmd : head -1 qc/Spondias_hap1/01_markers/summary.tsv > qc/Spondias_hap1/summary.tsv for f in qc/Spondias_hap1/01_markers/summary.tsv qc/Spondias_hap1/02_cells/summary.tsv qc/Spondias_hap1/03_cos/summary.tsv; do tail -n +2 "$f" >> qc/Spondias_hap1/summary.tsv; done : > qc/Spondias_hap1/flags.txt for f in qc/Spondias_hap1/01_markers/flags.txt qc/Spondias_hap1/02_cells/flags.txt qc/Spondias_hap1/03_cos/flags.txt; do grep -v '^#' "$f" >> qc/Spondias_hap1/flags.txt || true; done n=$(grep -c . qc/Spondias_hap1/flags.txt || true) echo "qc_report: Spondias_hap1 -- $n flags" >&2
+
+rule recombination_landscape   (2026-08-06; e.g. results/landscape/Spondias_hap1/02_marey_maps.pdf)
+   params   : 'results/landscape/Spondias_hap1' | 5 | 5 | 500
+   shellcmd : Rscript workflow/scripts/recombination_landscape.R --sample_id Spondias_hap1 --co_intervals results/crossovers/Spondias_hap1/co_intervals.bed --co_per_cell results/crossovers/Spondias_hap1/co_per_cell.tsv --chrom_map results/cell_data/Spondias_hap1/chrom_map.tsv --out_dir results/landscape/Spondias_hap1 --bin_mb 5 --coc_interval_mb 5 --n_boot 500 > logs/recombination_landscape/Spondias_hap1.log 2>&1
+
+rule rrna_blacklist   (2026-08-03; e.g. results/blacklist/Spondias_hap1/rrna_summary.txt)
+   params   : 'euk' | 2000 | 3000
+   shellcmd : barrnap --kingdom euk --threads 8 \ /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta > results/blacklist/Spondias_hap1/rrna.gff 2> logs/rrna_blacklist/Spondias_hap1.log # GFF is 1-based inclusive; BED is 0-based half-open. Flank absorbs # reads overhanging the annotated feature. merge_gap closes the # intergenic spacers *inside* a tandem array, which are just as deep as # the genes themselves - without it the array emerges as N separate # intervals with pathological holes between them. awk -F'\t' -v f=2000 '!/^#/{ s = $4 - 1 - f; if (s < 0) s = 0 print $1"\t"s"\t"$5 + f }' results/blacklist/Spondias_hap1/rrna.gff \ | sort -k1,1 -k2,2n \ | bedtools merge -d 3000 -i - > results/blacklist/Spondias_hap1/rrna_exclude.bed 2>> logs/rrna_blacklist/Spondias_hap1.log { echo "barrnap kingdom=euk flank=2000 merge_gap=3000" echo "rRNA featur ...
+
+rule select_cells   (2026-08-05; e.g. results/cell_qc/Spondias_hap1/selection_summary.txt)
+   params   : 0.12 | 30 | 800
+   shellcmd : Rscript workflow/scripts/select_cells.R --switches results/cell_qc/Spondias_hap1/switches.tsv --out results/cell_qc/Spondias_hap1/good_cells.tsv --out_summary results/cell_qc/Spondias_hap1/selection_summary.txt --min_total_markers 800 --min_per_chrom_markers 30 --max_switch_rate 0.12 > logs/select_cells/Spondias_hap1.log 2>&1
+
+rule star_index   (2026-07-10; e.g. results/star_index/Spondias_hap1)
+   shellcmd : mkdir -p results/star_index/Spondias_hap1 STAR --runMode genomeGenerate --runThreadN 16 --genomeDir results/star_index/Spondias_hap1 --genomeFastaFiles /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta --sjdbGTFfile results/annotation/Spondias_hap1.gtf --sjdbOverhang 99 --genomeSAindexNbases 13 > logs/star_index/Spondias_hap1.log 2>&1 touch results/star_index/Spondias_hap1/.done
+
+rule switch_diagnostics   (2026-08-05; e.g. results/cell_qc/Spondias_hap1/switch_diagnostics.pdf)
+   params   : 'results/cell_data/Spondias_hap1' | 'results/cell_qc/Spondias_hap1'
+   shellcmd : Rscript workflow/scripts/switch_diagnostics.R --cell_data_dir results/cell_data/Spondias_hap1 --out_dir results/cell_qc/Spondias_hap1 > logs/switch_diagnostics/Spondias_hap1.log 2>&1
+

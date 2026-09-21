@@ -1,0 +1,19 @@
+### /netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/.snakemake/conda/0ef6792ff8f27b888b67efdfa7458b8b_/bin/STAR-avx2   --runMode genomeGenerate      --runThreadN 16   --genomeDir results/star_index/Spondias_hap1   --genomeFastaFiles /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta      --genomeSAindexNbases 13   --sjdbGTFfile results/annotation/Spondias_hap1.gtf   --sjdbOverhang 99
+### GstrandBit 32
+versionGenome	2.7.4a
+genomeType	Full
+genomeFastaFiles	/netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta 
+genomeSAindexNbases	13
+genomeChrBinNbits	18
+genomeSAsparseD	1
+genomeTransformType	None
+genomeTransformVCF	-
+sjdbOverhang	99
+sjdbFileChrStartEnd	- 
+sjdbGTFfile	results/annotation/Spondias_hap1.gtf
+sjdbGTFchrPrefix	-
+sjdbGTFfeatureExon	exon
+sjdbGTFtagExonParentTranscript	transcript_id
+sjdbGTFtagExonParentGene	gene_id
+sjdbInsertSave	Basic
+genomeFileSizes	310513975 2539588734

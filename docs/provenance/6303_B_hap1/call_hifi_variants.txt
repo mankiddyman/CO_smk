@@ -1,0 +1,51 @@
+[M::mm_idx_gen::6.036*1.28] collected minimizers
+[M::mm_idx_gen::6.433*1.87] sorted minimizers
+[M::main::6.434*1.87] loaded/built the index for 7 target sequence(s)
+[M::mm_mapopt_update::6.866*1.82] mid_occ = 221
+[M::mm_idx_stat] kmer size: 19; skip: 19; is_hpc: 0; #seq: 7
+[M::mm_idx_stat::7.152*1.79] distinct minimizers: 28014839 (85.90% are singletons); average occurrences: 1.693; average spacing: 9.870; total length: 468120583
+[M::worker_pipeline::52.195*13.56] mapped 29987 sequences
+[M::worker_pipeline::95.637*14.54] mapped 30006 sequences
+[M::worker_pipeline::138.742*14.95] mapped 30024 sequences
+[M::worker_pipeline::185.135*15.17] mapped 29858 sequences
+[M::worker_pipeline::224.542*15.28] mapped 29875 sequences
+[M::worker_pipeline::267.083*15.37] mapped 29892 sequences
+[M::worker_pipeline::310.609*15.43] mapped 29889 sequences
+[M::worker_pipeline::357.078*15.48] mapped 29839 sequences
+[M::worker_pipeline::396.339*15.51] mapped 29843 sequences
+[M::worker_pipeline::438.377*15.54] mapped 29824 sequences
+[M::worker_pipeline::485.194*15.57] mapped 29886 sequences
+[M::worker_pipeline::524.505*15.59] mapped 29798 sequences
+[M::worker_pipeline::568.399*15.61] mapped 29800 sequences
+[M::worker_pipeline::610.398*15.62] mapped 29820 sequences
+[M::worker_pipeline::657.213*15.64] mapped 29824 sequences
+[M::worker_pipeline::696.894*15.64] mapped 29817 sequences
+[M::worker_pipeline::739.307*15.65] mapped 29825 sequences
+[M::worker_pipeline::785.954*15.67] mapped 29759 sequences
+[M::worker_pipeline::824.627*15.67] mapped 29777 sequences
+[M::worker_pipeline::868.251*15.68] mapped 29829 sequences
+[M::worker_pipeline::911.234*15.68] mapped 29815 sequences
+[M::worker_pipeline::957.651*15.69] mapped 29824 sequences
+[M::worker_pipeline::996.817*15.69] mapped 29899 sequences
+[M::worker_pipeline::1040.579*15.69] mapped 29827 sequences
+[M::worker_pipeline::1087.295*15.70] mapped 29774 sequences
+[M::worker_pipeline::1126.940*15.70] mapped 29701 sequences
+[M::worker_pipeline::1170.165*15.71] mapped 29723 sequences
+[M::worker_pipeline::1213.362*15.71] mapped 29733 sequences
+[M::worker_pipeline::1260.474*15.71] mapped 29763 sequences
+[M::worker_pipeline::1299.754*15.72] mapped 29745 sequences
+[M::worker_pipeline::1342.002*15.72] mapped 29761 sequences
+[M::worker_pipeline::1385.471*15.72] mapped 29741 sequences
+[M::worker_pipeline::1432.364*15.72] mapped 29666 sequences
+[M::worker_pipeline::1471.698*15.73] mapped 29715 sequences
+[M::worker_pipeline::1514.988*15.73] mapped 29642 sequences
+[M::worker_pipeline::1561.279*15.73] mapped 29632 sequences
+[M::worker_pipeline::1601.318*15.73] mapped 29706 sequences
+[M::worker_pipeline::1644.576*15.73] mapped 29723 sequences
+[M::worker_pipeline::1685.955*15.73] mapped 27976 sequences
+[M::main] Version: 2.28-r1209
+[M::main] CMD: minimap2 -t 16 -ax map-hifi /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta /biodata/dep_mercier/grp_marques/marques/Cuscuta-genomes/C_epithymum/m54336U_210427_165557.hifi_reads.fasta
+[M::main] Real time: 1686.195 sec; CPU: 26515.326 sec; Peak RSS: 10.387 GB
+Note: none of --samples-file, --ploidy or --ploidy-file given, assuming all sites are diploid
+[mpileup] 1 samples in 1 input files
+[mpileup] maximum number of reads per input file set to -d 250

@@ -14,7 +14,9 @@ whitelist_3p_v4: /netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/resources/whi
 
 # Stage 1 — het SNP marker filtering from HiFi
 marker_filters:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
     min_dp: 10
     max_dp: 80
     min_qual: 30
@@ -22,6 +24,7 @@ marker_filters:
     max_alt_ratio: 0.7
 
   Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | produced the reported figures (373 COs, 90 cells, nu 2.40)"
     # PINNED: values behind the reported figures (373 COs, 90 cells, nu=2.40).
     min_dp: 10
     max_dp: 80
@@ -30,6 +33,11 @@ marker_filters:
     max_alt_ratio: 0.7
 
   Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | recorded filter_markers params 2026-08-03: 0.3/0.7/10/150/30"
+    min_dp: 10
+    min_qual: 30
+    min_alt_ratio: 0.3
+    max_alt_ratio: 0.7
     # HiFi coverage ~91x (median DP of het SNPs; q1=79 q3=104 p90=117).
     # max_dp=80 sat BELOW the diploid peak and rejected 72% of real het sites,
     # giving 0.13% het — irreconcilable with the 0.62% in the collaborators'
@@ -40,6 +48,7 @@ marker_filters:
     max_dp: 150
 
   Drosera_binata:
+    _approved: "2026-09-15 | docs/binata_marker_audit.md"
     # Audited 2026-09-15. Values IDENTICAL to `default:` -- this block exists so
     # they are binata's OWN, with evidence, rather than Cuscuta's pinned tuning
     # inherited silently by param_for(). Workings: docs/binata_marker_audit.md
@@ -111,24 +120,80 @@ marker_filters:
 # ~50kb to the 590kb cap. 20000 sits in the valley, above the largest annotated
 # intron, and removes the artefact population at zero cost to real introns.
 star:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
     align_intron_max: 20000
+    align_mem_mb: 80000     # was hardcoded in starsolo_align until 2026-09-15
+    align_runtime: 480      # minutes; was hardcoded until 2026-09-15
+    bam_sort_ram: 20000000000   # bytes; hardcoded in starsolo_align until 2026-09-21
+    sam_mult_nmax: -1           # STAR's own default; each species sets its own
     sa_index_nbases: 13     # min(14, log2(genome)/2 - 1); 13 suits ~0.3-1 Gb
     sjdb_overhang: 99       # read_length - 1
     index_mem_mb: 64000     # STAR index scales with genome size
     index_runtime: 240
 
   Drosera_binata:
+    _approved: "2026-09-21 | intron cap from binata's own GFF3; sort RAM and multimapper cap from the failed 2026-09-15 run"
     sa_index_nbases: 13     # hap1 0.692 Gb -> formula gives 13
-    sjdb_overhang: 99       # R2 is 100 bp
+    sjdb_overhang: 99       # R2 measured at 100 bp in the LIBprxtR fastq
     index_mem_mb: 64000     # ~48 GB per Gb of genome, floored at 64 GB
     index_runtime: 240
+    # Measured 2026-09-15 from binata's OWN annotation.gff3 (92,954 introns
+    # from exon gaps across 15,858 genes; the GFF3 also carries 89,527 explicit
+    # intron features, the 3.8% difference being multi-isoform handling):
+    #            p50    p99     p99.9    max       >20kb
+    #   Spondias 177    2,881   8,249    19,287    0
+    #   binata   217    6,204   18,613   158,134   66 (0.0710%)
+    # Binata's introns run ~2.3x longer at the upper percentiles, so the
+    # Spondias JUSTIFICATION does not transfer even though the value does.
+    # There 20000 sat above the largest annotated intron and was free. Here it
+    # clips 66 annotated introns in <=66 of 15,858 genes -- a negligible number
+    # of LOST reads. Raising toward 158kb to recover them would reopen the
+    # artefact window measured on Spondias (1,600 N gaps between ~50kb and the
+    # 589,824 bp default cap, 0.297% of gaps), i.e. MISPLACED reads. Lost beats
+    # misplaced: a lost read costs one marker observation out of 10.8M markers;
+    # a misplaced read puts a wrong allele at a real marker and can be called
+    # as a crossover.
+    # NOTE: STAR inserts annotated junctions into the index as separate
+    # contigs, so reads spanning ANNOTATED junctions may align via the sjdb
+    # path largely independent of alignIntronMax, which chiefly constrains
+    # NOVEL junctions. If so those 66 cost nothing. Verify post-alignment from
+    # SJ.out.tab (column 6 = 1 for annotated).
+    align_intron_max: 20000
+    # 2.26 B read pairs vs Spondias's 468 M (4.8x; its "935M reads" note counts
+    # both mates). Runtime is advisory under --cores; enforced only by a
+    # scheduler profile.
+    align_mem_mb: 160000
+    align_runtime: 1440
+    # First alignment (2026-09-15) finished mapping and Solo counting, then died
+    # at the sort: "Max memory needed for sorting = 95534054128". 128 GB clears
+    # it with headroom, and sam_mult_nmax 1 should cut the need several-fold.
+    # That run: 89.6% mapped, 31.5% unique, 58.1% multi, 2.3 TB of _STARtmp.
+    # 94% of multimappers land in the collapsed 45S rDNA arrays (chr16 ~19.9 Mb,
+    # chr7 ~26.2 Mb); all are discarded at min_mapq 20, so writing them is cost.
+    bam_sort_ram: 128000000000
+    sam_mult_nmax: 1
 
   Drosera_paradoxa:
     sa_index_nbases: 14     # hap1 2.174 Gb -> formula gives 14 (the ceiling)
     sjdb_overhang: 99       # R2 is 100 bp
-    index_mem_mb: 110000    # 2.17 Gb genome; 64 GB is not enough
+    index_mem_mb: 110000    # 2.17 Gb genome; 64 GB is not enough. Now ALSO
+                            # passed to STAR as --limitGenomeGenerateRAM, whose
+                            # own default of 31 GB would have failed here.
     index_runtime: 600
+    # NOT YET MEASURED. Run the same intron extraction against paradoxa's
+    # annotation before trusting this value -- 2.17 Gb over 6 chromosomes is a
+    # different scale again, and inheriting a measurement made on another
+    # species is the mistake this repo has now made twice (Cuscuta's max_dp on
+    # binata; Spondias's intron cap here).
+    align_intron_max: 20000
+    align_mem_mb: 160000
+    align_runtime: 1440
+    # Sort requirement not measured yet; binata's figure as a starting point.
+    # If STAR dies at the sort it prints the exact number it needs.
+    bam_sort_ram: 128000000000
+    sam_mult_nmax: 1
 
   # PINNED to what actually built the existing index. Spondias reads are 90 bp
   # so 89 would be nominally correct, but the index was built at 99 and
@@ -137,19 +202,67 @@ star:
   # is a little wasted index memory and no loss of sensitivity. Revisit only
   # if Spondias is realigned from scratch.
   Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | genomeParameters.txt + STAR Log.out + recorded star_index 2026-07-10"
+    sa_index_nbases: 13   # recorded --genomeSAindexNbases 13
     sjdb_overhang: 99
+    # PINNED to the existing BAM. alignIntronMax was NEVER PLUMBED THROUGH
+    # until 2026-09-15 -- the value sat in config with its justification while
+    # STAR ran at its 589,824 bp default. The reported figures (153 cells,
+    # 1,740 COs, 1137 cM) were produced at the DEFAULT, so 589824 is recorded
+    # here as fact, not preference. Changing it would invalidate the BAM,
+    # cellsnp and the landscape. Revisit only on a full realignment.
+    align_intron_max: 589824
+    align_mem_mb: 80000
+    align_runtime: 480
+    # PINNED from Log.out's effective command: --limitBAMsortRAM 20000000000,
+    # no --outSAMmultNmax (STAR default -1).
+    bam_sort_ram: 20000000000
+    sam_mult_nmax: -1
+
+  Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | genomeParameters.txt + STAR Log.out, docs/provenance/6303_B_hap1"
+    # PINNED 2026-09-21 from the run's own records, not from config. Cuscuta's
+    # alignment ran in the older CO_snkmk checkout (conda path in
+    # results/starsolo/6303_B_hap1/Log.out) and has NO Snakemake metadata in
+    # this repo, so dry-runs cannot verify these values -- only its logs can.
+    #   genomeParameters.txt: genomeSAindexNbases 13, sjdbOverhang 99
+    #   Log.out effective command: no --alignIntronMax (STAR default, 589,824),
+    #   no --outSAMmultNmax (default -1), no --limitBAMsortRAM (default 0)
+    # Before this block, Cuscuta inherited default:, which claimed
+    # align_intron_max 20000 -- not what produced its published BAM.
+    sa_index_nbases: 13
+    sjdb_overhang: 99
+    align_intron_max: 589824
+    sam_mult_nmax: -1
+    bam_sort_ram: 0
+    index_mem_mb: 64000
+    index_runtime: 240
+    align_mem_mb: 80000
+    align_runtime: 480
 
 # cellsnp-lite read filters. min_mapq is ALSO used by filter_bam_uniq to
 # pre-filter the BAM -- the two must stay equal (see that rule's docstring).
 cell_snp:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
+    min_mapq: 20
+
+  Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | cellsnp-lite CMD in its log: --minMAPQ 20"
+    min_mapq: 20
+
+  Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | recorded cell_snp_counting params 2026-08-05: 20"
     min_mapq: 20
 
 # Stage 2 - cell calling (EmptyDrops/knee)
 # default_lower: UMI floor below which barcodes are treated as ambient. Was
 # hardcoded 300 in the rule until 2026-08-05.
 cell_calling:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
     # Swept 2026-08-05 (100/300/500/1000 -> 8919/8497/6285/3819 barcodes called):
     # final result IDENTICAL in all four (140 cells, 1581 COs, 1129 cM). The
     # cell_qc filters (min_total_markers 800, min_per_chrom 30, switch <=0.09)
@@ -160,9 +273,25 @@ cell_calling:
     # inconsequential here.
     default_lower: 300
 
+  Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | barcodes_called.tsv identical to the lower300 set"
+    default_lower: 300
+
+  Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | recorded cell_calling params 2026-08-05: 300"
+    default_lower: 300
+
 # Stage 3 — cell QC thresholds
 cell_qc:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
+    # !! ref_low / alt_high are NOT PLUMBED: switch_diagnostics passes neither,
+    # !! so switch_diagnostics.R uses its own 0.2 / 0.8 whatever is written
+    # !! here. Fix at binata's cell-QC gate, before stamping cell_qc for it.
+    # !! Spondias has recorded metadata for switch_diagnostics: run
+    # !! --cleanup-metadata on its outputs FIRST, or adding these params
+    # !! retriggers select_cells -> co_calling -> the reported landscape.
     ref_low: 0.2            # alt_ratio < this -> REF call (genotype 0)
     alt_high: 0.8           # alt_ratio > this -> ALT call (genotype 1)
     min_total_markers: 2500
@@ -170,6 +299,7 @@ cell_qc:
     max_switch_rate: 0.09
 
   Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | produced the reported figures (373 COs, 90 cells)"
     # PINNED: reported figures.
     ref_low: 0.2
     alt_high: 0.8
@@ -178,6 +308,7 @@ cell_qc:
     max_switch_rate: 0.09
 
   Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | recorded select_cells params 2026-08-05: 0.12/30/800"
     # Set 2026-08-04 from switch_diagnostics on 1,471,619 markers (max_dp=150).
     # 8,497 cells: median 531 markers/cell, DP mean 1.20 (89.5% single-read),
     # switch-rate distribution bimodal -- noise mode at ~0.26, clean haploid
@@ -211,7 +342,9 @@ cell_qc:
 
 # Stage 3d — CO calling (sliding-block)
 co_calling:
-  default:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species
+    # and decide every value from that species' own data, then stamp it.
     cell_markers: 2500      # keep equal to cell_qc.min_total_markers
     block_size: 2000000     # 2 Mb min block size
     marker_num: 23          # min markers per block
@@ -246,6 +379,10 @@ co_calling:
     genotype: 0.2
 
   Cuscuta_epithymum:
+    _approved: "PINNED 2026-09-21 | co_calling_params.txt 2500/2e6/23; smoothing not passed then, so hapCO's defaults (script unchanged since b23f23b, 2026-04-29)"
+    base_af: 0.3   # hapCO default, not passed in May
+    window_af: 0.4   # hapCO default, not passed in May
+    genotype: 0.2   # hapCO default, not passed in May
     # PINNED: history 8 -> 50 -> 30 -> 23. 23 produced the reported figures
     # (373 COs, nu=2.40). Lower catches more close DCOs but risks noise.
     cell_markers: 2500
@@ -253,6 +390,10 @@ co_calling:
     marker_num: 23
 
   Spondias_tuberosa:
+    _approved: "PINNED 2026-09-21 | recorded co_calling params 2026-08-06: 800/1e6/4/0.3/0.4/0.2"
+    base_af: 0.3
+    window_af: 0.4
+    genotype: 0.2
     # 16 chromosomes ~17 Mb each; median 103 markers/chr in passing cells
     # (~6 markers/Mb). Cuscuta's 2 Mb / 23 markers assumed ~3x this density and
     # would reject most Spondias chromosomes. 3 Mb blocks hold ~18 markers at

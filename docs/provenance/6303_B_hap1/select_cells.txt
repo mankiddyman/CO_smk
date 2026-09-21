@@ -1,0 +1,2 @@
+Wrote 90 cells to results/cell_qc/6303_B_hap1/good_cells.tsv
+Summary in results/cell_qc/6303_B_hap1/selection_summary.txt

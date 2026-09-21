@@ -1,0 +1,103 @@
+Reading samples.csv...
+Sample: 6303_B_hap1 (Cuscuta_epithymum, hap1)
+  Genes:       /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/Helixer/hap1/annotations/hap1_helixer_merged.gff3 
+  LTRs:        /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/DANTE/DANTE_LTR_annotation_full_genome.gff3 
+  Satellites:  /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/TideCluster/C_epithyumum_tidecluster_clustering.gff3 
+  SyRI:        /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/syri_hap1_hap2_aaryan_asm 
+  Hap2 fai:    /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap2.fasta.fai 
+  Markers:     results/markers/6303_B_hap1/markers.vcf.gz 
+Loading data...
+  90 cells, 373 COs, 7 hap1 chromosomes
+Loading hap2 chrom sizes...
+  7 hap2 chromosomes
+Building track data...
+  Loading gene gff...
+  20164 gene records on 7 chromosomes
+  Loading satellite gff...
+  259 satellite records on 7 chromosomes
+  Loading LTR gff...
+  15961 LTR records on 7 chromosomes
+  Loading VCF (markers.vcf.gz)...
+  4248719 variants on hap1 chromosomes
+Loading SyRI ribbons...
+  Loading SyRI...
+  793 ribbon records (>= 100000 bp, types: SYN,INV)
+Rendering plot...
+Warning messages:
+1: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+2: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+3: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+4: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+5: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+6: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+7: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+Warning messages:
+1: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+2: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+3: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+4: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+5: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+6: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+7: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+Warning messages:
+1: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+2: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+3: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+4: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+5: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+6: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+7: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+Warning messages:
+1: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+2: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+3: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+4: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+5: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+6: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+7: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+Warning messages:
+1: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+2: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+3: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+4: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+5: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+6: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+7: In text.default(x = x, y = y, labels = labels, pos = pos, offset = 0,  :
+  "chr" is not a graphical parameter
+null device 
+          1 
+Wrote: results/composite/6303_B_hap1/composite.pdf 

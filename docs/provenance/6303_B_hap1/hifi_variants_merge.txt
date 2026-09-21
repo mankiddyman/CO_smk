@@ -1,0 +1,9 @@
+Checking the headers and starting positions of 7 files
+[W::bcf_hdr_check_sanity] MQ should be declared as Type=Float
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_1.vcf.gz	3.794084 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_3.vcf.gz	2.351430 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_5.vcf.gz	1.708110 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_7.vcf.gz	2.083585 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_9.vcf.gz	1.962393 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_11.vcf.gz	1.954050 seconds
+Concatenating results/markers/6303_B_hap1/by_chrom/scaffold_13.vcf.gz	1.662720 seconds

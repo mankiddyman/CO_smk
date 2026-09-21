@@ -1,0 +1,7 @@
+Reading VCF: results/markers/6303_B_hap1/hifi_raw.vcf.gz
+Total variants: 7305567
+Biallelic SNPs: 6823976
+Heterozygous biallelic SNPs: 6821414
+null device 
+          1 
+Done. Inspect results/markers/6303_B_hap1/diagnostic_histograms.pdf and results/markers/6303_B_hap1/diagnostics_summary.txt

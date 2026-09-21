@@ -1,0 +1,8 @@
+co_calling parameters:
+  cell_markers (-c): 800
+  block_size   (-s): 1000000
+  marker_num   (-n): 4
+  baseAF:            0.3
+  windowAF:          0.4
+  genotype:          0.2
+  threads:           8

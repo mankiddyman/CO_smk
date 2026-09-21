@@ -1,0 +1,5 @@
+co_calling parameters:
+  cell_markers (-c): 2500
+  block_size   (-s): 2000000
+  marker_num   (-n): 23
+  threads:           8

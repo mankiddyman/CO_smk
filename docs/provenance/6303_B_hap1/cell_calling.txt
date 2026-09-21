@@ -1,0 +1,25 @@
+Loading raw matrix from results/starsolo/6303_B_hap1/Solo.out/GeneFull/raw
+Matrix: 20164 genes x 737280 barcodes, 18106327 non-zero
+Computing barcode ranks...
+Knee: 190 UMI, Inflection: 102 UMI
+Running emptyDrops with lower=100...
+  -> 60413 cells
+Running emptyDrops with lower=300...
+  -> 6874 cells
+Running emptyDrops with lower=500...
+  -> 2353 cells
+Running emptyDrops with lower=1000...
+  -> 329 cells
+[1] TRUE
+Canonical barcodes: results/cells/6303_B_hap1/barcodes_emptydrops_lower300.tsv -> barcodes_called.tsv
+          method n_cells median_umi median_genes min_umi max_umi is_default
+1       knee_190   60170        269          206     190    4877      FALSE
+2 inflection_102   83803        231          179     102    4877      FALSE
+3    ed_lower100   60413        268          206     104    4877      FALSE
+4    ed_lower300    6874        451          353     301    4877       TRUE
+5    ed_lower500    2353        663          500     501    4877      FALSE
+6   ed_lower1000     329       1382          881    1001    4877      FALSE
+null device 
+          1 
+=== DONE ===
+Default cells (lower=300): 6874

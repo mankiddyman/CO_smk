@@ -1,0 +1,19 @@
+### /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2   --runMode genomeGenerate      --runThreadN 16   --genomeDir results/star_index/6303_B_hap1   --genomeFastaFiles /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta      --genomeSAindexNbases 13   --sjdbGTFfile results/annotation/6303_B_hap1.gtf   --sjdbOverhang 99
+### GstrandBit 32
+versionGenome	2.7.4a
+genomeType	Full
+genomeFastaFiles	/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta 
+genomeSAindexNbases	13
+genomeChrBinNbits	18
+genomeSAsparseD	1
+genomeTransformType	None
+genomeTransformVCF	-
+sjdbOverhang	99
+sjdbFileChrStartEnd	- 
+sjdbGTFfile	results/annotation/6303_B_hap1.gtf
+sjdbGTFchrPrefix	-
+sjdbGTFfeatureExon	exon
+sjdbGTFtagExonParentTranscript	transcript_id
+sjdbGTFtagExonParentGene	gene_id
+sjdbInsertSave	Basic
+genomeFileSizes	490256875 4036506139

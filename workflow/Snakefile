@@ -16,19 +16,76 @@ SAMPLES = [s for s in samples.index.tolist()
 marker_samples = samples[samples["is_marker_reference"] == "yes"].index.tolist()
 
 def param_for(sample_id, section, key):
-    """Resolve a per-species parameter from config.
+    """Resolve a per-species parameter. STRICT since 2026-09-21: no fallback.
 
-    config[section] holds a 'default' block plus optional blocks keyed by the
-    `species` column of samples.csv. A species block need only list the keys
-    that differ from default. Species value wins; else default; else KeyError.
+    config[section][species] must exist, carry a non-empty `_approved` stamp
+    ("<date> | <evidence>"), and contain `key`. Anything else is a hard error
+    naming what is missing. A missing block or stamp means the stage has not
+    been reviewed for that species -- that refusal IS the approval gate.
+    `_template` blocks are never read: copy one when adding a species.
+    Resources that fail loudly when wrong go through resource_for() instead.
     """
-    sec = config[section]
     species = samples.loc[sample_id, "species"]
-    if species in sec and isinstance(sec[species], dict) and key in sec[species]:
-        return sec[species][key]
-    if "default" in sec and key in sec["default"]:
-        return sec["default"][key]
-    raise KeyError(f"config[{section!r}]: no {key!r} for species {species!r} and no default")
+    sec = config.get(section)
+    if not isinstance(sec, dict):
+        raise ValueError(f"config has no section {section!r}")
+    block = sec.get(species)
+    if not isinstance(block, dict):
+        raise ValueError(
+            f"GATE {section}.{species}: no block. Copy {section}._template, "
+            f"decide every value from {species}'s own data, add _approved, "
+            f"then rerun.")
+    if not str(block.get("_approved", "")).strip():
+        raise ValueError(
+            f"GATE {section}.{species}: no _approved stamp -- this stage has "
+            f"not been reviewed for {species}. Review it, then stamp it.")
+    if key not in block:
+        raise ValueError(
+            f"{section}.{species}.{key} is not set -- no defaults, by design.")
+    return block[key]
+
+
+def resource_for(sample_id, section, key):
+    """Memory, runtime and STAR buffers. A wrong value fails LOUDLY -- an OOM,
+    a timeout, or a STAR error naming the number it needs -- never as a
+    plausible wrong result, so these may fall back to _template. Never route
+    anything that changes outputs through here."""
+    species = samples.loc[sample_id, "species"]
+    sec = config[section]
+    block = sec.get(species)
+    if isinstance(block, dict) and key in block:
+        return block[key]
+    return sec["_template"][key]
+
+
+def approved(*sections):
+    """Input function: refuse to build the DAG for a species whose `sections`
+    are not stamped. Returns no files, so it never changes mtimes, params
+    hashes, or what a job reads. Evaluated when the DAG is built -- dry-runs
+    included, and before anything upstream runs -- which param_for() alone is
+    not: params are only formatted when a job starts."""
+    def _gate(w):
+        species = samples.loc[w.sample, "species"]
+        for section in sections:
+            block = config[section].get(species)
+            if not isinstance(block, dict):
+                raise ValueError(
+                    f"GATE {section}.{species}: no block -- not reviewed for "
+                    f"{species}. Copy {section}._template, decide every value "
+                    f"from {species}'s own data, add _approved.")
+            if not str(block.get("_approved", "")).strip():
+                raise ValueError(
+                    f"GATE {section}.{species}: no _approved stamp -- not "
+                    f"reviewed for {species} yet.")
+        return []
+    return _gate
+
+
+# {sample} never contains a slash. Without this, qc_report's
+# qc/{sample}/flags.txt also matches qc/X/01_markers/flags.txt -- its own
+# inputs -- and DAG building recurses into PeriodicWildcardError.
+wildcard_constraints:
+    sample = "[^/]+",
 
 
 
@@ -72,6 +129,7 @@ rule gff_to_gtf:
 
 rule star_index:
     input:
+        approved("star"),
         fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
         gtf   = "results/annotation/{sample}.gtf",
     output:
@@ -81,8 +139,8 @@ rule star_index:
     benchmark: "benchmarks/star_index/{sample}.tsv"
     threads: 16
     resources:
-        mem_mb  = lambda w: param_for(w.sample, "star", "index_mem_mb"),
-        runtime = lambda w: param_for(w.sample, "star", "index_runtime"),
+        mem_mb  = lambda w: resource_for(w.sample, "star", "index_mem_mb"),
+        runtime = lambda w: resource_for(w.sample, "star", "index_runtime"),
     conda: "envs/star.yaml"
     params:
         # min(14, log2(genome)/2 - 1). STAR pre-indexes every k-mer prefix of
@@ -91,6 +149,10 @@ rule star_index:
         # seed. 13 suits ~0.3-1 Gb; 14 is the ceiling, for >1 Gb.
         sa_nbases = lambda w: param_for(w.sample, "star", "sa_index_nbases"),
         sjdb_overhang = lambda w: param_for(w.sample, "star", "sjdb_overhang"),
+        # STAR's OWN cap, distinct from resources.mem_mb (the scheduler ask).
+        # STAR defaults to 31 GB internally and dies on large genomes
+        # regardless of what Snakemake reserved. Bytes, not MB.
+        limit_ram = lambda w: int(resource_for(w.sample, "star", "index_mem_mb")) * 1000000,
     shell:
         """
         mkdir -p {output[0]}
@@ -101,6 +163,7 @@ rule star_index:
              --sjdbGTFfile {input.gtf} \
              --sjdbOverhang {params.sjdb_overhang} \
              --genomeSAindexNbases {params.sa_nbases} \
+             --limitGenomeGenerateRAM {params.limit_ram} \
              > {log} 2>&1
         touch {output.done}
         """
@@ -148,6 +211,7 @@ def starsolo_params_for(sample_id):
 
 rule starsolo_align:
     input:
+        approved("star"),
         index = "results/star_index/{sample}/.done",
         cdna  = lambda w: starsolo_inputs_for(w.sample)[0],
         cb    = lambda w: starsolo_inputs_for(w.sample)[1],
@@ -162,8 +226,8 @@ rule starsolo_align:
     benchmark: "benchmarks/starsolo/{sample}.tsv"
     threads: 16
     resources:
-        mem_mb = 80000,
-        runtime = 480,
+        mem_mb  = lambda w: resource_for(w.sample, "star", "align_mem_mb"),
+        runtime = lambda w: resource_for(w.sample, "star", "align_runtime"),
     conda: "envs/star.yaml"
     params:
         index_dir = lambda w: f"results/star_index/{w.sample}",
@@ -172,6 +236,24 @@ rule starsolo_align:
         cb_len  = lambda w: starsolo_params_for(w.sample)["cb_len"],
         umi_len = lambda w: starsolo_params_for(w.sample)["umi_len"],
         strand  = lambda w: starsolo_params_for(w.sample)["strand"],
+        # STAR's default alignIntronMax 0 resolves to
+        # (2^winBinNbits)*winAnchorDistNbins = 589,824 bp -- a mammal-scale
+        # figure. Capping it is the difference between LOST reads (a junction
+        # read that fails to align: costs one marker observation) and MISPLACED
+        # reads (a spurious long-gap alignment: puts a wrong allele at a real
+        # marker in a real cell, which reads as a haplotype switch and can be
+        # called as a crossover). Always prefer lost over misplaced.
+        intron_max = lambda w: param_for(w.sample, "star", "align_intron_max"),
+        # Bytes. STAR's own BAM-sort buffer, distinct from resources.mem_mb.
+        # Hardcoded at 20 GB until 2026-09-21; binata's first alignment died at
+        # the sort AFTER finishing mapping and Solo counting (needed 96.5 GB).
+        bam_sort_ram = lambda w: resource_for(w.sample, "star", "bam_sort_ram"),
+        # Alignments written to the BAM per multimapping read. -1 = STAR's
+        # default (all, up to outFilterMultimapNmax 10); 1 = primary only. At
+        # binata's 58% multimapping the default writes ~13 B records that
+        # filter_bam_uniq and cell_snp_counting both discard at min_mapq 20.
+        # Solo counting is unaffected -- this changes BAM content only.
+        sam_mult_nmax = lambda w: param_for(w.sample, "star", "sam_mult_nmax"),
     shell:
         """
         mkdir -p {params.out_prefix}
@@ -191,7 +273,9 @@ rule starsolo_align:
              --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
              --soloCellFilter None \
              --soloBarcodeReadLength 0 \
-             --limitBAMsortRAM 20000000000 \
+             --alignIntronMax {params.intron_max} \
+             --outSAMmultNmax {params.sam_mult_nmax} \
+             --limitBAMsortRAM {params.bam_sort_ram} \
              --outSAMtype BAM SortedByCoordinate \
              --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
              --outFileNamePrefix {params.out_prefix} \
@@ -222,6 +306,7 @@ rule starsolo_qc:
 
 rule cell_calling:
     input:
+        approved("cell_calling"),
         matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
     output:
         called = "results/cells/{sample}/barcodes_called.tsv",
@@ -419,9 +504,9 @@ rule rrna_blacklist:
         runtime = 30,
     conda: "envs/barrnap.yaml"
     params:
-        kingdom = config.get("rrna", {}).get("kingdom", "euk"),
-        flank = config.get("rrna", {}).get("flank_bp", 2000),
-        merge_gap = config.get("rrna", {}).get("merge_gap_bp", 3000),
+        kingdom = config["rrna"]["kingdom"],
+        flank = config["rrna"]["flank_bp"],
+        merge_gap = config["rrna"]["merge_gap_bp"],
     shell:
         r"""
         barrnap --kingdom {params.kingdom} --threads {threads} \
@@ -457,6 +542,7 @@ rule rrna_blacklist:
 rule filter_markers:
     """Filter raw HiFi VCF to high-confidence heterozygous SNPs."""
     input:
+        approved("marker_filters"),
         vcf = "results/markers/{sample}/hifi_raw.vcf.gz",
         rrna_bed = "results/blacklist/{sample}/rrna_exclude.bed",
     output:
@@ -533,6 +619,7 @@ rule filter_bam_uniq:
     config cell_snp.min_mapq) or the prefilter silently removes reads cellsnp
     would have kept."""
     input:
+        approved("cell_snp"),
         bam = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam",
         bai = "results/starsolo/{sample}/Aligned.sortedByCoord.out.bam.bai",
     output:
@@ -564,6 +651,7 @@ rule qc_01_markers:
     max_dp bug was visible HERE but was not caught until CO calling days later.
     """
     input:
+        approved("marker_filters", "co_calling"),
         raw_vcf     = "results/markers/{sample}/hifi_raw.vcf.gz",
         markers_vcf = "results/markers/{sample}/markers.vcf.gz",
         fai         = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
@@ -618,6 +706,7 @@ rule qc_02_cells:
     chromosome; on the raw BAM it shows 8143x at chr13:0-50000.
     """
     input:
+        approved("cell_calling", "cell_snp", "cell_qc"),
         star_log        = "results/starsolo/{sample}/Log.final.out",
         matrix          = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
         barcodes_called = "results/cells/{sample}/barcodes_called.tsv",
@@ -677,6 +766,7 @@ rule qc_02_cells:
 rule qc_03_cos:
     """QC stage 03: crossover calls, detection saturation, obligate-CO floor."""
     input:
+        approved("co_calling"),
         co_intervals      = "results/crossovers/{sample}/co_intervals.bed",
         co_summary        = "results/crossovers/{sample}/co_summary.txt",
         landscape_summary = "results/landscape/{sample}/landscape_summary.tsv",
@@ -744,6 +834,7 @@ rule qc_report:
 rule cell_snp_counting:
     """Per-cell allele counts at marker positions using cellsnp-lite."""
     input:
+        approved("cell_snp"),
         bam = "results/starsolo/{sample}/Aligned.uniq.bam",
         bai = "results/starsolo/{sample}/Aligned.uniq.bam.bai",
         barcodes = "results/cells/{sample}/barcodes_called.tsv",
@@ -850,6 +941,7 @@ rule switch_diagnostics:
 rule select_cells:
     """Apply cell QC thresholds to identify cells suitable for CO calling."""
     input:
+        approved("cell_qc"),
         switches = "results/cell_qc/{sample}/switches.tsv",
     output:
         good_cells = "results/cell_qc/{sample}/good_cells.tsv",
@@ -882,6 +974,7 @@ rule co_calling:
     """Call crossovers per cell using hapCO_identification.R.
     Runs in parallel across cells via xargs -P {threads}."""
     input:
+        approved("co_calling"),
         good_cells = "results/cell_qc/{sample}/good_cells.tsv",
         chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
     output:

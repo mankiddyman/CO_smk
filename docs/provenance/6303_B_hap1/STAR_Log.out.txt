@@ -1,0 +1,264 @@
+STAR version=2.7.11b
+STAR compilation time,server,dir=2025-07-24T03:06:21+0000 :/opt/conda/conda-bld/star_1753326220084/work/source
+##### Command Line:
+/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2 --runMode alignReads --runThreadN 16 --genomeDir results/star_index/6303_B_hap1 --readFilesIn /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz --readFilesCommand zcat --soloType CB_UMI_Simple --soloCBwhitelist /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 10 --soloFeatures Gene GeneFull --soloStrand Reverse --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloCellFilter None --soloBarcodeReadLength 0 --outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outFileNamePrefix results/starsolo/6303_B_hap1/
+##### Initial USER parameters from Command Line:
+outFileNamePrefix                 results/starsolo/6303_B_hap1/
+###### All USER parameters from Command Line:
+runMode                       alignReads        ~RE-DEFINED
+runThreadN                    16     ~RE-DEFINED
+genomeDir                     results/star_index/6303_B_hap1     ~RE-DEFINED
+readFilesIn                   /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz        ~RE-DEFINED
+readFilesCommand              zcat        ~RE-DEFINED
+soloType                      CB_UMI_Simple     ~RE-DEFINED
+soloCBwhitelist               /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt        ~RE-DEFINED
+soloCBstart                   1     ~RE-DEFINED
+soloCBlen                     16     ~RE-DEFINED
+soloUMIstart                  17     ~RE-DEFINED
+soloUMIlen                    10     ~RE-DEFINED
+soloFeatures                  Gene   GeneFull        ~RE-DEFINED
+soloStrand                    Reverse     ~RE-DEFINED
+soloUMIfiltering              MultiGeneUMI_CR        ~RE-DEFINED
+soloUMIdedup                  1MM_CR        ~RE-DEFINED
+soloCBmatchWLtype             1MM_multi_Nbase_pseudocounts     ~RE-DEFINED
+soloCellFilter                None        ~RE-DEFINED
+soloBarcodeReadLength         0     ~RE-DEFINED
+outSAMtype                    BAM   SortedByCoordinate        ~RE-DEFINED
+outSAMattributes              NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM        ~RE-DEFINED
+outFileNamePrefix             results/starsolo/6303_B_hap1/     ~RE-DEFINED
+##### Finished reading parameters from all sources
+
+##### Final user re-defined parameters-----------------:
+runMode                           alignReads   
+runThreadN                        16
+genomeDir                         results/star_index/6303_B_hap1
+readFilesIn                       /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz   
+readFilesCommand                  zcat   
+outFileNamePrefix                 results/starsolo/6303_B_hap1/
+outSAMtype                        BAM   SortedByCoordinate   
+outSAMattributes                  NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM   
+soloType                          CB_UMI_Simple
+soloCBstart                       1
+soloUMIstart                      17
+soloCBlen                         16
+soloUMIlen                        10
+soloBarcodeReadLength             0
+soloCBwhitelist                   /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt   
+soloStrand                        Reverse
+soloFeatures                      Gene   GeneFull   
+soloUMIdedup                      1MM_CR   
+soloCBmatchWLtype                 1MM_multi_Nbase_pseudocounts
+soloCellFilter                    None   
+soloUMIfiltering                  MultiGeneUMI_CR   
+
+-------------------------------
+##### Final effective command line:
+/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2   --runMode alignReads      --runThreadN 16   --genomeDir results/star_index/6303_B_hap1   --readFilesIn /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz      --readFilesCommand zcat      --outFileNamePrefix results/starsolo/6303_B_hap1/   --outSAMtype BAM   SortedByCoordinate      --outSAMattributes NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM      --soloType CB_UMI_Simple   --soloCBstart 1   --soloUMIstart 17   --soloCBlen 16   --soloUMIlen 10   --soloBarcodeReadLength 0   --soloCBwhitelist /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt      --soloStrand Reverse   --soloFeatures Gene   GeneFull      --soloUMIdedup 1MM_CR      --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts   --soloCellFilter None      --soloUMIfiltering MultiGeneUMI_CR   
+----------------------------------------
+
+Number of fastq files for each mate = 1
+
+   Input read files for mate 1 :
+-rwxrwx--- 1 abhatia grp_marques 42922349871 Oct 10  2024 /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz
+
+   readsCommandsFile:
+exec > "results/starsolo/6303_B_hap1/_STARtmp/tmp.fifo.read1"
+echo FILE 0
+zcat      "/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz"
+
+
+   Input read files for mate 2 :
+-rwxrwx--- 1 abhatia grp_marques 15042113662 Oct 10  2024 /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz
+
+   readsCommandsFile:
+exec > "results/starsolo/6303_B_hap1/_STARtmp/tmp.fifo.read2"
+echo FILE 0
+zcat      "/biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz"
+
+Number of CBs in the whitelist = 737280
+Apr 21 21:13:54 ... Finished reading, sorting and deduplicating CB whitelist sequences.
+WARNING: --limitBAMsortRAM=0, will use genome size as RAM limit for BAM sorting
+Finished loading and checking parameters
+Reading genome generation parameters:
+### /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2   --runMode genomeGenerate      --runThreadN 16   --genomeDir results/star_index/6303_B_hap1   --genomeFastaFiles /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta      --genomeSAindexNbases 13   --sjdbGTFfile results/annotation/6303_B_hap1.gtf   --sjdbOverhang 99
+### GstrandBit=32
+versionGenome                 2.7.4a     ~RE-DEFINED
+genomeType                    Full     ~RE-DEFINED
+genomeFastaFiles              /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta        ~RE-DEFINED
+genomeSAindexNbases           13     ~RE-DEFINED
+genomeChrBinNbits             18     ~RE-DEFINED
+genomeSAsparseD               1     ~RE-DEFINED
+genomeTransformType           None     ~RE-DEFINED
+genomeTransformVCF            -     ~RE-DEFINED
+sjdbOverhang                  99     ~RE-DEFINED
+sjdbFileChrStartEnd           -        ~RE-DEFINED
+sjdbGTFfile                   results/annotation/6303_B_hap1.gtf     ~RE-DEFINED
+sjdbGTFchrPrefix              -     ~RE-DEFINED
+sjdbGTFfeatureExon            exon     ~RE-DEFINED
+sjdbGTFtagExonParentTranscripttranscript_id     ~RE-DEFINED
+sjdbGTFtagExonParentGene      gene_id     ~RE-DEFINED
+sjdbInsertSave                Basic     ~RE-DEFINED
+genomeFileSizes               490256875   4036506139        ~RE-DEFINED
+Genome version is compatible with current STAR
+Number of real (reference) chromosomes= 7
+1	scaffold_1	115033074	0
+2	scaffold_3	70127185	115081216
+3	scaffold_5	53759275	185335808
+4	scaffold_7	62652297	239337472
+5	scaffold_9	57751073	301989888
+6	scaffold_11	56325952	359923712
+7	scaffold_13	52471727	416284672
+--sjdbOverhang = 99 taken from the generated genome
+Started loading the genome: Tue Apr 21 21:13:54 2026
+
+Genome: size given as a parameter = 490256875
+SA: size given as a parameter = 4036506139
+SAindex: size given as a parameter = 1
+Read from SAindex: pGe.gSAindexNbases=13  nSAi=89478484
+nGenome=490256875;  nSAbyte=4036506139
+GstrandBit=32   SA number of indices=978546942
+Shared memory is not used for genomes. Allocated a private copy of the genome.
+Genome file size: 490256875 bytes; state: good=1 eof=0 fail=0 bad=0
+Loading Genome ... done! state: good=1 eof=0 fail=0 bad=0; loaded 490256875 bytes
+SA file size: 4036506139 bytes; state: good=1 eof=0 fail=0 bad=0
+Loading SA ... done! state: good=1 eof=0 fail=0 bad=0; loaded 4036506139 bytes
+Loading SAindex ... done: 391468491 bytes
+Finished loading the genome: Tue Apr 21 21:13:55 2026
+
+Processing splice junctions database sjdbN=106941,   pGe.sjdbOverhang=99 
+alignIntronMax=alignMatesGapMax=0, the max intron size will be approximately determined by (2^winBinNbits)*winAnchorDistNbins=589824
+Loaded transcript database, nTr=20164
+Loaded exon database, nEx=127105
+Created thread # 1
+Created thread # 2
+Created thread # 3
+Starting to map file # 0
+mate 1:   /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz
+mate 2:   /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz
+Created thread # 4
+Created thread # 5
+Created thread # 6
+Created thread # 7
+Created thread # 8
+Created thread # 9
+Created thread # 10
+Created thread # 11
+Created thread # 12
+Created thread # 13
+Created thread # 14
+Created thread # 15
+BAM sorting: 125888 mapped reads
+BAM sorting bins genomic start loci:
+1	0	6411172
+2	0	14062349
+3	0	27480286
+4	0	37702728
+5	0	46217715
+6	0	61786037
+7	0	71205827
+8	0	87810840
+9	0	102280062
+10	0	113675880
+11	1	13567551
+12	1	17281085
+13	1	29074233
+14	1	41103089
+15	1	50425461
+16	1	57940266
+17	1	68599183
+18	2	8732707
+19	2	16791252
+20	2	27041232
+21	2	32593982
+22	2	40865400
+23	2	50925136
+24	3	7104537
+25	3	16556413
+26	3	28456248
+27	3	38991567
+28	3	49918790
+29	3	55621463
+30	4	3107816
+31	4	10610631
+32	4	13843246
+33	4	25205918
+34	4	29227370
+35	4	30245823
+36	4	38782873
+37	4	48424048
+38	5	1141004
+39	5	9289992
+40	5	18778328
+41	5	31635671
+42	5	41723781
+43	5	45320054
+44	6	2300203
+45	6	13781410
+46	6	21561632
+47	6	30994144
+48	6	40561031
+Thread #7 end of input stream, nextChar=-1
+Completed: thread #3
+Completed: thread #14
+Completed: thread #10
+Completed: thread #13
+Completed: thread #15
+Completed: thread #6
+Completed: thread #4
+Completed: thread #5
+Completed: thread #9
+Completed: thread #7
+Completed: thread #11
+Completed: thread #0
+Completed: thread #1
+Joined thread # 1
+Completed: thread #8
+Completed: thread #2
+Joined thread # 2
+Joined thread # 3
+Joined thread # 4
+Joined thread # 5
+Joined thread # 6
+Joined thread # 7
+Joined thread # 8
+Joined thread # 9
+Joined thread # 10
+Joined thread # 11
+Completed: thread #12
+Joined thread # 12
+Joined thread # 13
+Joined thread # 14
+Joined thread # 15
+Apr 21 21:45:33 ..... finished mapping
+RAM after mapping:
+VmPeak:	 8712408 kB; VmSize:	 8552964 kB; VmHWM:	 7876924 kB; VmRSS:	 7874044 kB; 
+RAM after freeing genome index memory:
+VmPeak:	 8712408 kB; VmSize:	 3749996 kB; VmHWM:	 7876924 kB; VmRSS:	 3071076 kB; 
+Apr 21 21:45:35 ..... started Solo counting
+Apr 21 21:45:35 ... Starting Solo post-map for GeneFull
+Apr 21 21:45:35 ... Finished allocating arrays for Solo 1.78096 GiB
+Apr 21 21:46:28 ... Finished reading reads from Solo files nCB=586470, nReadPerCBmax=59308, yesWLmatch=0
+RAM for solo feature GeneFull
+VmPeak:	 8712408 kB; VmSize:	 6008556 kB; VmHWM:	 7876924 kB; VmRSS:	 5329720 kB; 
+Apr 21 21:46:58 ... Finished collapsing UMIs
+Apr 21 21:46:58 ... Solo: writing raw matrix
+Solo output directory directory exists and will be overwritten: results/starsolo/6303_B_hap1/Solo.out/GeneFull//raw/
+Apr 21 21:47:00 ... Solo: cell filtering
+RAM after completing solo:
+VmPeak:	 8712408 kB; VmSize:	 3767588 kB; VmHWM:	 7876924 kB; VmRSS:	 3088804 kB; 
+Apr 21 21:47:00 ... Starting Solo post-map for Gene
+Apr 21 21:47:01 ... Allocated and initialized readInfo array, nReadsInput = 516116457
+Apr 21 21:47:01 ... Finished allocating arrays for Solo 2.40493 GiB
+Apr 21 21:49:03 ... Finished reading reads from Solo files nCB=574454, nReadPerCBmax=54588, yesWLmatch=0
+RAM for solo feature Gene
+VmPeak:	14696944 kB; VmSize:	14696944 kB; VmHWM:	14018120 kB; VmRSS:	14018120 kB; 
+Apr 21 21:49:43 ... Finished collapsing UMIs
+Apr 21 21:49:43 ... Solo: writing raw matrix
+Solo output directory directory created: results/starsolo/6303_B_hap1/Solo.out/Gene//raw/
+Apr 21 21:49:44 ... Solo: cell filtering
+RAM after completing solo:
+VmPeak:	14696944 kB; VmSize:	11838960 kB; VmHWM:	14018120 kB; VmRSS:	11160176 kB; 
+Apr 21 21:49:44 ..... finished Solo counting
+Apr 21 21:49:44 ..... started sorting BAM
+Max memory needed for sorting = 3241071564
+ALL DONE!

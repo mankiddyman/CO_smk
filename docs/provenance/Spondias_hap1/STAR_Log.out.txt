@@ -1,0 +1,283 @@
+STAR version=2.7.11b
+STAR compilation time,server,dir=2025-11-14T12:06:42+0000 :/opt/conda/conda-bld/star_1763121846936/work/source
+##### Command Line:
+/netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/.snakemake/conda/0ef6792ff8f27b888b67efdfa7458b8b_/bin/STAR-avx2 --runMode alignReads --runThreadN 16 --genomeDir results/star_index/Spondias_hap1 --readFilesIn /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz --readFilesCommand zcat --soloType CB_UMI_Simple --soloCBwhitelist /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 10 --soloFeatures Gene GeneFull --soloStrand Reverse --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloCellFilter None --soloBarcodeReadLength 0 --limitBAMsortRAM 20000000000 --outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outFileNamePrefix results/starsolo/Spondias_hap1/
+##### Initial USER parameters from Command Line:
+outFileNamePrefix                 results/starsolo/Spondias_hap1/
+###### All USER parameters from Command Line:
+runMode                       alignReads        ~RE-DEFINED
+runThreadN                    16     ~RE-DEFINED
+genomeDir                     results/star_index/Spondias_hap1     ~RE-DEFINED
+readFilesIn                   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz        ~RE-DEFINED
+readFilesCommand              zcat        ~RE-DEFINED
+soloType                      CB_UMI_Simple     ~RE-DEFINED
+soloCBwhitelist               /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt        ~RE-DEFINED
+soloCBstart                   1     ~RE-DEFINED
+soloCBlen                     16     ~RE-DEFINED
+soloUMIstart                  17     ~RE-DEFINED
+soloUMIlen                    10     ~RE-DEFINED
+soloFeatures                  Gene   GeneFull        ~RE-DEFINED
+soloStrand                    Reverse     ~RE-DEFINED
+soloUMIfiltering              MultiGeneUMI_CR        ~RE-DEFINED
+soloUMIdedup                  1MM_CR        ~RE-DEFINED
+soloCBmatchWLtype             1MM_multi_Nbase_pseudocounts     ~RE-DEFINED
+soloCellFilter                None        ~RE-DEFINED
+soloBarcodeReadLength         0     ~RE-DEFINED
+limitBAMsortRAM               20000000000     ~RE-DEFINED
+outSAMtype                    BAM   SortedByCoordinate        ~RE-DEFINED
+outSAMattributes              NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM        ~RE-DEFINED
+outFileNamePrefix             results/starsolo/Spondias_hap1/     ~RE-DEFINED
+##### Finished reading parameters from all sources
+
+##### Final user re-defined parameters-----------------:
+runMode                           alignReads   
+runThreadN                        16
+genomeDir                         results/star_index/Spondias_hap1
+readFilesIn                       /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz   
+readFilesCommand                  zcat   
+limitBAMsortRAM                   20000000000
+outFileNamePrefix                 results/starsolo/Spondias_hap1/
+outSAMtype                        BAM   SortedByCoordinate   
+outSAMattributes                  NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM   
+soloType                          CB_UMI_Simple
+soloCBstart                       1
+soloUMIstart                      17
+soloCBlen                         16
+soloUMIlen                        10
+soloBarcodeReadLength             0
+soloCBwhitelist                   /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt   
+soloStrand                        Reverse
+soloFeatures                      Gene   GeneFull   
+soloUMIdedup                      1MM_CR   
+soloCBmatchWLtype                 1MM_multi_Nbase_pseudocounts
+soloCellFilter                    None   
+soloUMIfiltering                  MultiGeneUMI_CR   
+
+-------------------------------
+##### Final effective command line:
+/netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/.snakemake/conda/0ef6792ff8f27b888b67efdfa7458b8b_/bin/STAR-avx2   --runMode alignReads      --runThreadN 16   --genomeDir results/star_index/Spondias_hap1   --readFilesIn /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz,/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz      --readFilesCommand zcat      --limitBAMsortRAM 20000000000   --outFileNamePrefix results/starsolo/Spondias_hap1/   --outSAMtype BAM   SortedByCoordinate      --outSAMattributes NH   HI   nM   AS   CR   UR   CB   UB   GX   GN   sS   sQ   sM      --soloType CB_UMI_Simple   --soloCBstart 1   --soloUMIstart 17   --soloCBlen 16   --soloUMIlen 10   --soloBarcodeReadLength 0   --soloCBwhitelist /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt      --soloStrand Reverse   --soloFeatures Gene   GeneFull      --soloUMIdedup 1MM_CR      --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts   --soloCellFilter None      --soloUMIfiltering MultiGeneUMI_CR   
+----------------------------------------
+
+Number of fastq files for each mate = 2
+
+   Input read files for mate 1 :
+-rwxrwx--- 1 mzhang grp_marques 10620246545 Dec  8  2023 /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz
+-rwxrwx--- 1 mzhang grp_marques 11216737453 Dec  8  2023 /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz
+
+   readsCommandsFile:
+exec > "results/starsolo/Spondias_hap1/_STARtmp/tmp.fifo.read1"
+echo FILE 0
+zcat      "/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz"
+echo FILE 1
+zcat      "/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz"
+
+
+   Input read files for mate 2 :
+-rwxrwx--- 1 mzhang grp_marques 4457911525 Dec  8  2023 /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz
+-rwxrwx--- 1 mzhang grp_marques 4704174371 Dec  8  2023 /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz
+
+   readsCommandsFile:
+exec > "results/starsolo/Spondias_hap1/_STARtmp/tmp.fifo.read2"
+echo FILE 0
+zcat      "/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz"
+echo FILE 1
+zcat      "/biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz"
+
+Number of CBs in the whitelist = 737280
+Jul 10 17:25:31 ... Finished reading, sorting and deduplicating CB whitelist sequences.
+Finished loading and checking parameters
+Reading genome generation parameters:
+### /netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/.snakemake/conda/0ef6792ff8f27b888b67efdfa7458b8b_/bin/STAR-avx2   --runMode genomeGenerate      --runThreadN 16   --genomeDir results/star_index/Spondias_hap1   --genomeFastaFiles /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta      --genomeSAindexNbases 13   --sjdbGTFfile results/annotation/Spondias_hap1.gtf   --sjdbOverhang 99
+### GstrandBit=32
+versionGenome                 2.7.4a     ~RE-DEFINED
+genomeType                    Full     ~RE-DEFINED
+genomeFastaFiles              /netscratch/dep_mercier/grp_marques/marques/Spondias_tuberosa/google_drive_download/hap1scaffold.FINAL.fasta        ~RE-DEFINED
+genomeSAindexNbases           13     ~RE-DEFINED
+genomeChrBinNbits             18     ~RE-DEFINED
+genomeSAsparseD               1     ~RE-DEFINED
+genomeTransformType           None     ~RE-DEFINED
+genomeTransformVCF            -     ~RE-DEFINED
+sjdbOverhang                  99     ~RE-DEFINED
+sjdbFileChrStartEnd           -        ~RE-DEFINED
+sjdbGTFfile                   results/annotation/Spondias_hap1.gtf     ~RE-DEFINED
+sjdbGTFchrPrefix              -     ~RE-DEFINED
+sjdbGTFfeatureExon            exon     ~RE-DEFINED
+sjdbGTFtagExonParentTranscripttranscript_id     ~RE-DEFINED
+sjdbGTFtagExonParentGene      gene_id     ~RE-DEFINED
+sjdbInsertSave                Basic     ~RE-DEFINED
+genomeFileSizes               310513975   2539588734        ~RE-DEFINED
+Genome version is compatible with current STAR
+Number of real (reference) chromosomes= 16
+1	1	26391264	0
+2	2	20189635	26476544
+3	3	19467971	46923776
+4	4	19258083	66584576
+5	5	18454486	85983232
+6	6	18134488	104595456
+7	7	17891115	122945536
+8	8	17873497	141033472
+9	9	17868040	159121408
+10	10	17700210	177209344
+11	11	17075505	195035136
+12	12	15416435	212336640
+13	13	14785245	227803136
+14	14	13776783	242745344
+15	15	12741370	256638976
+16	16	16679001	269484032
+--sjdbOverhang = 99 taken from the generated genome
+Started loading the genome: Fri Jul 10 17:25:31 2026
+
+Genome: size given as a parameter = 310513975
+SA: size given as a parameter = 2539588734
+SAindex: size given as a parameter = 1
+Read from SAindex: pGe.gSAindexNbases=13  nSAi=89478484
+nGenome=310513975;  nSAbyte=2539588734
+GstrandBit=32   SA number of indices=615657874
+Shared memory is not used for genomes. Allocated a private copy of the genome.
+Genome file size: 310513975 bytes; state: good=1 eof=0 fail=0 bad=0
+Loading Genome ... done! state: good=1 eof=0 fail=0 bad=0; loaded 310513975 bytes
+SA file size: 2539588734 bytes; state: good=1 eof=0 fail=0 bad=0
+Loading SA ... done! state: good=1 eof=0 fail=0 bad=0; loaded 2539588734 bytes
+Loading SAindex ... done: 391468491 bytes
+Finished loading the genome: Fri Jul 10 17:25:32 2026
+
+Processing splice junctions database sjdbN=121873,   pGe.sjdbOverhang=99 
+alignIntronMax=alignMatesGapMax=0, the max intron size will be approximately determined by (2^winBinNbits)*winAnchorDistNbins=589824
+Loaded transcript database, nTr=24151
+Loaded exon database, nEx=146024
+Created thread # 1
+Starting to map file # 0
+mate 1:   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R2_001.fastq.gz
+mate 2:   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L001_R1_001.fastq.gz
+Created thread # 2
+Created thread # 3
+Created thread # 4
+Created thread # 5
+Created thread # 6
+Created thread # 7
+Created thread # 8
+Created thread # 9
+Created thread # 10
+Created thread # 11
+Created thread # 12
+Created thread # 13
+Created thread # 14
+Created thread # 15
+BAM sorting: 137801 mapped reads
+BAM sorting bins genomic start loci:
+1	2	19124624
+2	6	12298557
+3	10	1219906
+4	12	1181
+5	12	1459
+6	12	1648
+7	12	2462
+8	12	3530
+9	12	4137
+10	12	4561
+11	12	4914
+12	12	5406
+13	12	5851
+14	12	12351
+15	12	12620
+16	12	12815
+17	12	13705
+18	12	14702
+19	12	15376
+20	12	15750
+21	12	16108
+22	12	16612
+23	12	17084
+24	12	23541
+25	12	23791
+26	12	24003
+27	12	25345
+28	12	25864
+29	12	26556
+30	12	26920
+31	12	27283
+32	12	27785
+33	12	28285
+34	12	34710
+35	12	34952
+36	12	35182
+37	12	36559
+38	12	37027
+39	12	37730
+40	12	38092
+41	12	38454
+42	12	38964
+43	12	39594
+44	12	45923
+45	12	46129
+46	12	46400
+47	12	47904
+48	12	48243
+Starting to map file # 1
+mate 1:   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R2_001.fastq.gz
+mate 2:   /biodata/dep_mercier/grp_marques/marques/Spondias_tuberosa_project/Spondius_tuberosa_6178A/Q3115173AF_20231208131431__23022a081_01_fastq_files/23022a081_01_S3_L002_R1_001.fastq.gz
+Thread #15 end of input stream, nextChar=-1
+Completed: thread #0
+Completed: thread #13
+Completed: thread #5
+Completed: thread #7
+Completed: thread #2
+Completed: thread #12
+Completed: thread #6
+Completed: thread #8
+Completed: thread #3
+Completed: thread #10
+Completed: thread #9
+Completed: thread #1
+Joined thread # 1
+Joined thread # 2
+Joined thread # 3
+Completed: thread #15
+Completed: thread #14
+Completed: thread #4
+Joined thread # 4
+Joined thread # 5
+Joined thread # 6
+Joined thread # 7
+Joined thread # 8
+Joined thread # 9
+Joined thread # 10
+Completed: thread #11
+Joined thread # 11
+Joined thread # 12
+Joined thread # 13
+Joined thread # 14
+Joined thread # 15
+Jul 10 17:56:51 ..... finished mapping
+RAM after mapping:
+VmPeak:	 7144912 kB; VmSize:	 6937616 kB; VmHWM:	 6261376 kB; VmRSS:	 6258484 kB; 
+RAM after freeing genome index memory:
+VmPeak:	 7144912 kB; VmSize:	 3772012 kB; VmHWM:	 6261376 kB; VmRSS:	 3092880 kB; 
+Jul 10 17:56:52 ..... started Solo counting
+Jul 10 17:56:52 ... Starting Solo post-map for GeneFull
+Jul 10 17:56:52 ... Finished allocating arrays for Solo 0.69479 GiB
+Jul 10 17:57:12 ... Finished reading reads from Solo files nCB=354587, nReadPerCBmax=166342, yesWLmatch=0
+RAM for solo feature GeneFull
+VmPeak:	 7144912 kB; VmSize:	 4652784 kB; VmHWM:	 6261376 kB; VmRSS:	 3973712 kB; 
+Jul 10 17:57:28 ... Finished collapsing UMIs
+Jul 10 17:57:28 ... Solo: writing raw matrix
+Solo output directory directory exists and will be overwritten: results/starsolo/Spondias_hap1/Solo.out/GeneFull//raw/
+Jul 10 17:57:29 ... Solo: cell filtering
+RAM after completing solo:
+VmPeak:	 7144912 kB; VmSize:	 3778528 kB; VmHWM:	 6261376 kB; VmRSS:	 3099488 kB; 
+Jul 10 17:57:29 ... Starting Solo post-map for Gene
+Jul 10 17:57:31 ... Allocated and initialized readInfo array, nReadsInput = 467663806
+Jul 10 17:57:31 ... Finished allocating arrays for Solo 0.873892 GiB
+Jul 10 17:58:55 ... Finished reading reads from Solo files nCB=327342, nReadPerCBmax=139027, yesWLmatch=0
+RAM for solo feature Gene
+VmPeak:	12128364 kB; VmSize:	12128364 kB; VmHWM:	11449324 kB; VmRSS:	11449324 kB; 
+Jul 10 17:59:15 ... Finished collapsing UMIs
+Jul 10 17:59:15 ... Solo: writing raw matrix
+Solo output directory directory created: results/starsolo/Spondias_hap1/Solo.out/Gene//raw/
+Jul 10 17:59:16 ... Solo: cell filtering
+RAM after completing solo:
+VmPeak:	12128364 kB; VmSize:	11089840 kB; VmHWM:	11449324 kB; VmRSS:	10410800 kB; 
+Jul 10 17:59:16 ..... finished Solo counting
+Jul 10 17:59:16 ..... started sorting BAM
+Max memory needed for sorting = 11998440810
+ALL DONE!

@@ -1,0 +1,29 @@
+Chromosomes: 7 
+Cells to process: 6874 
+Processing cells...
+   500 / 6874 
+   1000 / 6874 
+   1500 / 6874 
+   2000 / 6874 
+   2500 / 6874 
+   3000 / 6874 
+   3500 / 6874 
+   4000 / 6874 
+   4500 / 6874 
+   5000 / 6874 
+   5500 / 6874 
+   6000 / 6874 
+   6500 / 6874 
+Wrote results/cell_qc/6303_B_hap1/switches.tsv 
+null device 
+          1 
+Wrote results/cell_qc/6303_B_hap1/switch_diagnostics.pdf 
+
+=== Summary ===
+Total cells processed: 6874
+Cells with >=300 markers: 6874
+Cells with >=500 markers: 6869
+Switch rate quartiles (cells >=300 markers): 0.043 / 0.134 / 0.152 / 0.168 / 0.235
+
+Applying Meng's loose filter (>=300 markers, switch_rate <=0.13): 1375 cells pass
+Applying Meng's strict filter (>=500 markers, switch_rate <=0.10): 259 cells pass

@@ -1,0 +1,10 @@
+	/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2 --runMode alignReads --runThreadN 16 --genomeDir results/star_index/6303_B_hap1 --readFilesIn /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/Files/scRNA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R3_001.fastq.gz /biodata/dep_mercier/grp_marques/marques/Hologen/SINGLE_CELL_SEQ_DATA/Cuscuta_epithymum_6303B/6303_B/6303_B_S1_L001_R1_001.fastq.gz --readFilesCommand zcat --soloType CB_UMI_Simple --soloCBwhitelist /opt/share/software/packages/cellranger-9.0.1/bin/lib/python/cellranger/barcodes/737K-august-2016.txt --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 10 --soloFeatures Gene GeneFull --soloStrand Reverse --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloCellFilter None --soloBarcodeReadLength 0 --outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outFileNamePrefix results/starsolo/6303_B_hap1/
+	STAR version: 2.7.11b   compiled: 2025-07-24T03:06:21+0000 :/opt/conda/conda-bld/star_1753326220084/work/source
+Apr 21 21:13:53 ..... started STAR run
+Apr 21 21:13:54 ..... loading genome
+Apr 21 21:13:55 ..... started mapping
+Apr 21 21:45:33 ..... finished mapping
+Apr 21 21:45:35 ..... started Solo counting
+Apr 21 21:49:44 ..... finished Solo counting
+Apr 21 21:49:44 ..... started sorting BAM
+Apr 21 22:08:18 ..... finished successfully

@@ -1,0 +1,361 @@
+Info: barcode AACTCAGTCTGCGTAA 
+Info: barcode ACCCACTAGGCATGTG 
+Info: barcode ACGGGCTCAGCTGGCT 
+Info: barcode ACATACGAGGACACCA 
+Info: barcode AAAGCAAAGAGTACCG 
+Info: barcode AACTCTTCACTTAACG 
+Info: barcode ACTGCTCAGAGTACAT 
+Info: barcode AACCATGAGGCTAGGT 
+Info: total smoothed sites: 95 out of 2982 for barcode AACTCAGTCTGCGTAA 
+null device 
+          1 
+Info: total smoothed sites: 138 out of 2924 for barcode ACCCACTAGGCATGTG 
+null device 
+          1 
+Info: total smoothed sites: 77 out of 2802 for barcode AACTCTTCACTTAACG 
+null device 
+          1 
+Info: total smoothed sites: 139 out of 3227 for barcode ACTGCTCAGAGTACAT 
+null device 
+          1 
+Info: total smoothed sites: 119 out of 3473 for barcode ACGGGCTCAGCTGGCT 
+null device 
+          1 
+Info: total smoothed sites: 196 out of 3665 for barcode ACATACGAGGACACCA 
+null device 
+          1 
+Info: total smoothed sites: 149 out of 3503 for barcode AAAGCAAAGAGTACCG 
+null device 
+          1 
+Info: total smoothed sites: 106 out of 3807 for barcode AACCATGAGGCTAGGT 
+null device 
+          1 
+Info: barcode ACTTGTTCAATGGATA 
+Info: barcode ACTTTCAGTCAGAAGC 
+Info: barcode ACTTGTTCACATGGGA 
+Info: barcode AGCATACCAGGGAGAG 
+Info: barcode AGCATACTCATGTAGC 
+Info: barcode AGCCTAATCGCTTAGA 
+Info: barcode AGGTCCGTCGTTACGA 
+Info: barcode AGCGGTCTCTATCCTA 
+Info: total smoothed sites: 94 out of 2550 for barcode ACTTGTTCAATGGATA 
+null device 
+          1 
+Info: total smoothed sites: 103 out of 2938 for barcode ACTTGTTCACATGGGA 
+null device 
+          1 
+Info: total smoothed sites: 99 out of 2815 for barcode AGCGGTCTCTATCCTA 
+null device 
+          1 
+Info: total smoothed sites: 138 out of 4328 for barcode ACTTTCAGTCAGAAGC 
+null device 
+          1 
+Info: total smoothed sites: 147 out of 3198 for barcode AGGTCCGTCGTTACGA 
+null device 
+          1 
+Info: barcode AGTAGTCGTCACCCAG 
+Info: total smoothed sites: 192 out of 4393 for barcode AGCATACCAGGGAGAG 
+null device 
+          1 
+Info: total smoothed sites: 160 out of 3477 for barcode AGCATACTCATGTAGC 
+null device 
+          1 
+Info: barcode AGTGGGAGTGTGACGA 
+Info: total smoothed sites: 224 out of 5106 for barcode AGCCTAATCGCTTAGA 
+null device 
+          1 
+Info: barcode ATAGACCCACACTGCG 
+Info: barcode ATGGGAGAGTCCTCCT 
+Info: barcode CAACCAATCCAAACTG 
+Info: barcode ATTATCCGTTGTTTGG 
+Info: barcode ATTATCCGTTCGAATC 
+Info: barcode CAACCTCAGCCCTAAT 
+Info: total smoothed sites: 111 out of 2590 for barcode AGTGGGAGTGTGACGA 
+null device 
+          1 
+Info: total smoothed sites: 123 out of 4088 for barcode AGTAGTCGTCACCCAG 
+null device 
+          1 
+Info: total smoothed sites: 82 out of 2506 for barcode ATAGACCCACACTGCG 
+null device 
+          1 
+Info: barcode CAAGAAAAGTCTCGGC 
+Info: total smoothed sites: 147 out of 3351 for barcode ATGGGAGAGTCCTCCT 
+Info: total smoothed sites: 145 out of 2911 for barcode ATTATCCGTTGTTTGG 
+null device 
+          1 
+null device 
+          1 
+Info: total smoothed sites: 111 out of 3614 for barcode ATTATCCGTTCGAATC 
+null device 
+          1 
+Info: barcode CACACTCGTACCGTAT 
+Info: barcode CACAGGCAGGGCATGT 
+Info: total smoothed sites: 261 out of 4675 for barcode CAACCAATCCAAACTG 
+Info: total smoothed sites: 117 out of 3427 for barcode CAACCTCAGCCCTAAT 
+null device 
+          1 
+null device 
+          1 
+Info: barcode CACCTTGTCTTCGAGA 
+Info: barcode CACCACTCAATTGCTG 
+Info: barcode CACTCCACAGGGTTAG 
+Info: barcode CAGCCGACATGTCGAT 
+Info: barcode CATCAGATCACTCTTA 
+Info: total smoothed sites: 124 out of 3544 for barcode CACAGGCAGGGCATGT 
+null device 
+          1 
+Info: total smoothed sites: 197 out of 4340 for barcode CACACTCGTACCGTAT 
+null device 
+          1 
+Info: total smoothed sites: 247 out of 5521 for barcode CAAGAAAAGTCTCGGC 
+null device 
+          1 
+Info: total smoothed sites: 137 out of 2850 for barcode CACCTTGTCTTCGAGA 
+null device 
+          1 
+Info: barcode CCAATCCGTGAACCTT 
+Info: total smoothed sites: 127 out of 4331 for barcode CACCACTCAATTGCTG 
+null device 
+          1 
+Info: total smoothed sites: 103 out of 3620 for barcode CACTCCACAGGGTTAG 
+Info: total smoothed sites: 187 out of 3587 for barcode CATCAGATCACTCTTA 
+null device 
+          1 
+null device 
+          1 
+Info: barcode CCTACCATCCTAGTGA 
+Info: barcode CCCAGTTGTTGTCGCG 
+Info: barcode CCTAGCTAGATGGGTC 
+Info: barcode CGCCAAGTCGCCATAA 
+Info: barcode CCTTACGCAGAGTGTG 
+Info: total smoothed sites: 265 out of 5775 for barcode CAGCCGACATGTCGAT 
+null device 
+          1 
+Info: barcode CGAGAAGAGACTAGAT 
+Info: barcode CGGACGTGTCCGAACC 
+Info: total smoothed sites: 91 out of 3122 for barcode CCTACCATCCTAGTGA 
+null device 
+          1 
+Info: total smoothed sites: 137 out of 3345 for barcode CCTAGCTAGATGGGTC 
+null device 
+          1 
+Info: total smoothed sites: 146 out of 4266 for barcode CCCAGTTGTTGTCGCG 
+null device 
+          1 
+Info: total smoothed sites: 119 out of 4696 for barcode CCAATCCGTGAACCTT 
+null device 
+          1 
+Info: barcode CGGACTGTCTGTGCAA 
+Info: total smoothed sites: 129 out of 2721 for barcode CGAGAAGAGACTAGAT 
+null device 
+          1 
+Info: total smoothed sites: 156 out of 3834 for barcode CGCCAAGTCGCCATAA 
+null device 
+          1 
+Info: barcode CGGAGCTGTCAATACC 
+Info: total smoothed sites: 175 out of 3865 for barcode CCTTACGCAGAGTGTG 
+null device 
+          1 
+Info: barcode CGTCAGGGTTAAGATG 
+Info: barcode CGTGAGCCAATCGAAA 
+Info: barcode CGTTGGGAGCTAAACA 
+Info: barcode CTAATGGCAACTGCGC 
+Info: barcode CTACGTCGTCAGCTAT 
+Info: total smoothed sites: 135 out of 4665 for barcode CGGACGTGTCCGAACC 
+null device 
+          1 
+Info: total smoothed sites: 77 out of 2614 for barcode CGGACTGTCTGTGCAA 
+null device 
+          1 
+Info: barcode CTACGTCGTGCTGTAT 
+Info: total smoothed sites: 128 out of 2514 for barcode CGTTGGGAGCTAAACA 
+null device 
+          1 
+Info: barcode CTAGTGACAGATCTGT 
+Info: total smoothed sites: 148 out of 3625 for barcode CGGAGCTGTCAATACC 
+null device 
+          1 
+Info: total smoothed sites: 155 out of 3972 for barcode CGTGAGCCAATCGAAA 
+null device 
+          1 
+Info: total smoothed sites: 111 out of 2745 for barcode CTACGTCGTCAGCTAT 
+null device 
+          1 
+Info: total smoothed sites: 121 out of 3557 for barcode CTAATGGCAACTGCGC 
+null device 
+          1 
+Info: barcode CTCGAGGCAAGCGAGT 
+Info: total smoothed sites: 255 out of 4958 for barcode CGTCAGGGTTAAGATG 
+null device 
+          1 
+Info: barcode CTCGGAGGTTGGGACA 
+Info: barcode CTCGTACAGAGAACAG 
+Info: total smoothed sites: 107 out of 2616 for barcode CTACGTCGTGCTGTAT 
+null device 
+          1 
+Info: barcode CTCTAATAGGTGCTTT 
+Info: barcode GAAGCAGAGGATATAC 
+Info: barcode GACCAATGTTGTCGCG 
+Info: total smoothed sites: 70 out of 3017 for barcode CTAGTGACAGATCTGT 
+null device 
+          1 
+Info: barcode GACGTGCGTACCGAGA 
+Info: total smoothed sites: 138 out of 2598 for barcode CTCGAGGCAAGCGAGT 
+null device 
+          1 
+Info: barcode GACTAACAGTACATGA 
+Info: barcode GACTGCGAGCCGCCTA 
+Info: total smoothed sites: 152 out of 3909 for barcode CTCGTACAGAGAACAG 
+null device 
+          1 
+Info: total smoothed sites: 126 out of 3126 for barcode GAAGCAGAGGATATAC 
+null device 
+          1 
+Info: total smoothed sites: 181 out of 4860 for barcode CTCGGAGGTTGGGACA 
+null device 
+          1 
+Info: barcode GCAGTTATCTTAACCT 
+Info: total smoothed sites: 153 out of 5211 for barcode GACCAATGTTGTCGCG 
+null device 
+          1 
+Info: total smoothed sites: 239 out of 5839 for barcode CTCTAATAGGTGCTTT 
+null device 
+          1 
+Info: total smoothed sites: 197 out of 3950 for barcode GACGTGCGTACCGAGA 
+null device 
+          1 
+Info: barcode GGACAGAAGGCACATG 
+Info: barcode GGAGCAACATTACCTT 
+Info: barcode GGCGACTAGGATCGCA 
+Info: total smoothed sites: 123 out of 3333 for barcode GACTGCGAGCCGCCTA 
+null device 
+          1 
+Info: barcode GGGATGAAGGGCTCTC 
+Info: barcode GGGATGATCTCCAACC 
+Info: total smoothed sites: 257 out of 6156 for barcode GACTAACAGTACATGA 
+null device 
+          1 
+Info: barcode GGTGAAGGTCGAGTTT 
+Info: total smoothed sites: 97 out of 3103 for barcode GCAGTTATCTTAACCT 
+null device 
+          1 
+Info: barcode GTATTCTGTGCTTCTC 
+Info: barcode GTCCTCAAGTCCTCCT 
+Info: total smoothed sites: 154 out of 4111 for barcode GGACAGAAGGCACATG 
+null device 
+          1 
+Info: total smoothed sites: 114 out of 2535 for barcode GGCGACTAGGATCGCA 
+null device 
+          1 
+Info: total smoothed sites: 151 out of 4076 for barcode GGAGCAACATTACCTT 
+null device 
+          1 
+Info: total smoothed sites: 137 out of 3222 for barcode GGGATGAAGGGCTCTC 
+null device 
+          1 
+Info: total smoothed sites: 149 out of 3578 for barcode GGGATGATCTCCAACC 
+null device 
+          1 
+Info: barcode GTGCATAAGTCTCAAC 
+Info: barcode GTGTGCGTCTCGAGTA 
+Info: barcode GTTACAGAGGGTTCCC 
+Info: barcode GTTCTCGTCTGTACGA 
+Info: total smoothed sites: 128 out of 3405 for barcode GTATTCTGTGCTTCTC 
+null device 
+          1 
+Info: barcode GTTTCTAGTCGAAAGC 
+Info: total smoothed sites: 206 out of 4991 for barcode GGTGAAGGTCGAGTTT 
+null device 
+          1 
+Info: barcode TAAGAGATCAGCTCGG 
+Info: barcode TACCTTAAGCCGGTAA 
+Info: total smoothed sites: 178 out of 4108 for barcode GTCCTCAAGTCCTCCT 
+null device 
+          1 
+Info: total smoothed sites: 98 out of 3103 for barcode GTGCATAAGTCTCAAC 
+null device 
+          1 
+Info: total smoothed sites: 124 out of 3766 for barcode GTTACAGAGGGTTCCC 
+null device 
+          1 
+Info: barcode TAGTGGTAGCGGCTTC 
+Info: total smoothed sites: 115 out of 3509 for barcode GTGTGCGTCTCGAGTA 
+null device 
+          1 
+Info: total smoothed sites: 81 out of 3135 for barcode GTTTCTAGTCGAAAGC 
+null device 
+          1 
+Info: total smoothed sites: 210 out of 3890 for barcode GTTCTCGTCTGTACGA 
+null device 
+          1 
+Info: barcode TCACGAATCGGAGCAA 
+Info: barcode TCGAGGCAGGCGACAT 
+Info: barcode TCATTACGTACAAGTA 
+Info: total smoothed sites: 128 out of 3209 for barcode TAAGAGATCAGCTCGG 
+null device 
+          1 
+Info: barcode TCGCGAGTCCATGAGT 
+Info: barcode TCGTAGAAGAGCCCAA 
+Info: total smoothed sites: 154 out of 4631 for barcode TACCTTAAGCCGGTAA 
+null device 
+          1 
+Info: barcode TCTCTAACATGAACCT 
+Info: total smoothed sites: 103 out of 2850 for barcode TAGTGGTAGCGGCTTC 
+null device 
+          1 
+Info: barcode TGGCTGGCATATACGC 
+Info: total smoothed sites: 123 out of 2720 for barcode TCGCGAGTCCATGAGT 
+null device 
+          1 
+Info: barcode TGTATTCAGATGGCGT 
+Info: total smoothed sites: 91 out of 2880 for barcode TCGTAGAAGAGCCCAA 
+null device 
+          1 
+Info: total smoothed sites: 243 out of 4229 for barcode TCGAGGCAGGCGACAT 
+null device 
+          1 
+Info: total smoothed sites: 171 out of 4205 for barcode TCACGAATCGGAGCAA 
+null device 
+          1 
+Info: total smoothed sites: 92 out of 2782 for barcode TCTCTAACATGAACCT 
+null device 
+          1 
+Info: total smoothed sites: 131 out of 4597 for barcode TCATTACGTACAAGTA 
+null device 
+          1 
+Info: barcode TGTCCCAAGTATCTCG 
+Info: barcode TTCTTAGAGAGCCTAG 
+Info: total smoothed sites: 72 out of 2559 for barcode TGGCTGGCATATACGC 
+null device 
+          1 
+Info: barcode TTGAACGAGATCTGAA 
+Info: barcode TTGGAACAGACTAAGT 
+Info: barcode TTTGGTTTCGCTAGCG 
+Info: barcode TTGGCAAGTAGCGTCC 
+Info: total smoothed sites: 158 out of 3208 for barcode TGTATTCAGATGGCGT 
+null device 
+          1 
+Info: barcode TTTGTCATCCAAAGTC 
+Info: total smoothed sites: 217 out of 3771 for barcode TGTCCCAAGTATCTCG 
+null device 
+          1 
+Info: total smoothed sites: 85 out of 2789 for barcode TTGAACGAGATCTGAA 
+null device 
+          1 
+Info: total smoothed sites: 112 out of 2540 for barcode TTTGGTTTCGCTAGCG 
+null device 
+          1 
+Info: total smoothed sites: 103 out of 2625 for barcode TTGGCAAGTAGCGTCC 
+null device 
+          1 
+Info: total smoothed sites: 172 out of 3603 for barcode TTCTTAGAGAGCCTAG 
+null device 
+          1 
+Info: total smoothed sites: 121 out of 3731 for barcode TTGGAACAGACTAAGT 
+null device 
+          1 
+Info: total smoothed sites: 112 out of 2939 for barcode TTTGTCATCCAAAGTC 
+null device 
+          1 
+co_calling complete: 90 cells processed

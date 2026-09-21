@@ -1,0 +1,16 @@
+	/netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/CO_snkmk/.snakemake/conda/a36aa12b071547ffa6feb8a1fbffe482_/bin/STAR-avx2 --runMode genomeGenerate --runThreadN 16 --genomeDir results/star_index/6303_B_hap1 --genomeFastaFiles /netscratch/dep_mercier/grp_marques/Aaryan/Cuscuta/epithymum/results/assemblies/C_epithymum_haphic_mar2026/HiC_scaffolding/haphic/05.post_juicebox/hap1.fasta --sjdbGTFfile results/annotation/6303_B_hap1.gtf --sjdbOverhang 99 --genomeSAindexNbases 13
+	STAR version: 2.7.11b   compiled: 2025-07-24T03:06:21+0000 :/opt/conda/conda-bld/star_1753326220084/work/source
+Apr 21 16:08:42 ..... started STAR run
+Apr 21 16:08:42 ... starting to generate Genome files
+Apr 21 16:08:48 ..... processing annotations GTF
+Apr 21 16:08:51 ... starting to sort Suffix Array. This may take a long time...
+Apr 21 16:08:54 ... sorting Suffix Array chunks and saving them to disk...
+Apr 21 16:10:07 ... loading chunks from disk, packing SA...
+Apr 21 16:10:17 ... finished generating suffix array
+Apr 21 16:10:17 ... generating Suffix Array index
+Apr 21 16:10:57 ... completed Suffix Array index
+Apr 21 16:10:57 ..... inserting junctions into the genome indices
+Apr 21 16:11:33 ... writing Genome to disk ...
+Apr 21 16:11:33 ... writing Suffix Array to disk ...
+Apr 21 16:11:34 ... writing SAindex to disk
+Apr 21 16:11:34 ..... finished successfully
