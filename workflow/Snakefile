@@ -1173,38 +1173,96 @@ def hap_source(w):
     raise ValueError(f"{ref_dir}/MANIFEST.txt has no source_fasta line")
 
 
-rule hap_align:
-    """hap2 aligned onto hap1 (the published reference), whole genome, base-level.
+def hap2_chroms(w):
+    """hap2 sequence names, one per hap1 chromosome (chrN_hap1 -> chrN_hap2),
+    read from the reference .fai. hap_align checks afterwards that they cover
+    every sequence in hap2.fa, so a hap2-only scaffold cannot slip through."""
+    fai = samples.loc[w.sample, "assembly_fasta"] + ".fai"
+    with open(fai) as fh:
+        names = [l.split("\t", 1)[0] for l in fh if l.strip()]
+    bad = [n for n in names if not n.endswith("_hap1")]
+    if bad:
+        raise ValueError(f"{fai}: sequence names without the _hap1 suffix: {bad[:3]}")
+    return [n[: -len("_hap1")] + "_hap2" for n in names]
 
-    One PAF feeds the marker audit (assembly SNPs via paftools call, which
-    needs --cs; alignable regions) and SyRI's rearrangement calls (--eqx).
-    Nothing in the crossover chain reads it, so it can never trigger a rerun.
-    asm20, not asm5: at binata's ~2.8% divergence asm5 aligned 31.9% of hap2
-    against asm20's 59.2% (marker audit, 2026-09-15). -K4G loads all of hap2
-    in one batch so threads run across chromosomes (one thread per sequence).
-    """
+
+rule hap2_extract:
+    """hap2's sequences, cut from the dual assembly the reference MANIFEST names."""
     input:
-        hap1 = lambda w: samples.loc[w.sample, "assembly_fasta"],
         dual = hap_source,
     output:
         hap2 = "results/hap_align/{sample}/hap2.fa",
-        paf = "results/hap_align/{sample}/hap2_on_hap1.paf",
     log:
-        "logs/hap_align/{sample}.log",
-    benchmark:
-        "benchmarks/hap_align/{sample}.tsv",
-    threads: 24
-    resources:
-        # scheduling token under hpc09's strict overcommit: ~30 MB per Mb of hap1
-        mem_mb = lambda w: max(20000, int(30 * os.path.getsize(samples.loc[w.sample, "assembly_fasta"]) / 1e6)),
-        runtime = 720,
-    conda:
-        "envs/hap_align.yaml"
+        "logs/hap_align/{sample}.hap2_extract.log",
     shell:
         r"""
         awk '/^>/ {{keep = ($1 ~ /_hap2$/)}} keep' {input.dual} > {output.hap2} 2> {log}
         echo "hap2 sequences: $(grep -c '^>' {output.hap2})" >> {log}
         test -s {output.hap2}
-        minimap2 -x asm20 -c --eqx --cs -t {threads} -I8G -K4G \
-            {input.hap1} {output.hap2} > {output.paf} 2>> {log}
+        """
+
+
+rule hap_align_chrom:
+    """One whole hap2 chromosome aligned onto all of hap1 (minimap2 asm20, base-level).
+
+    minimap2 maps each query sequence independently: the same index and
+    settings give the same alignments whether it is handed one chromosome or
+    all of them (verified: byte-identical PAF on simulated haplotypes with
+    repeats, an inversion and a translocation). One job per chromosome
+    therefore reproduces a whole-genome run exactly and only bounds memory to
+    one chromosome -- all six of paradoxa's in flight at once failed to
+    allocate in 160 GB. Wall time is set by the longest chromosome, which one
+    thread aligns on its own.
+    asm20, not asm5: at binata's ~2.8% divergence asm5 aligned 31.9% of hap2
+    against asm20's 59.2% (marker audit, 2026-09-15). --cs for paftools call,
+    --eqx for SyRI.
+    """
+    input:
+        hap1 = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        hap2 = "results/hap_align/{sample}/hap2.fa",
+    output:
+        paf = "results/hap_align/{sample}/by_chrom/{chrom}.paf",
+    log:
+        "logs/hap_align/{sample}.{chrom}.log",
+    benchmark:
+        "benchmarks/hap_align/{sample}.{chrom}.tsv",
+    threads: 2
+    resources:
+        mem_mb = 16000,
+        runtime = 2880,
+    conda:
+        "envs/hap_align.yaml"
+    shell:
+        r"""
+        trap 'rm -f {output.paf}.query.fa' EXIT
+        awk -v c={wildcards.chrom} '/^>/ {{keep = (substr($1, 2) == c)}} keep' {input.hap2} > {output.paf}.query.fa
+        test -s {output.paf}.query.fa
+        minimap2 -x asm20 -c --eqx --cs -t {threads} -I8G {input.hap1} {output.paf}.query.fa > {output.paf} 2> {log}
+        """
+
+
+rule hap_align:
+    """All of hap2 on hap1: the per-chromosome PAFs concatenated in hap1 order,
+    after checking they cover every sequence in hap2.fa. Feeds the marker
+    audit (assembly SNPs, alignable regions) and SyRI. Nothing in the
+    crossover chain reads it, so it can never trigger a rerun."""
+    input:
+        hap2 = "results/hap_align/{sample}/hap2.fa",
+        pafs = lambda w: expand("results/hap_align/{sample}/by_chrom/{chrom}.paf",
+                                sample=w.sample, chrom=hap2_chroms(w)),
+    output:
+        paf = "results/hap_align/{sample}/hap2_on_hap1.paf",
+    log:
+        "logs/hap_align/{sample}.log",
+    params:
+        expected = lambda w: " ".join(sorted(hap2_chroms(w))),
+    shell:
+        r"""
+        have=$(grep '^>' {input.hap2} | cut -c2- | awk '{{print $1}}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+        if [ "$have" != "{params.expected}" ]; then
+            echo "hap2.fa holds [$have], expected [{params.expected}]" > {log}
+            exit 1
+        fi
+        cat {input.pafs} > {output.paf}
+        echo "concatenated $(echo {input.pafs} | wc -w) chromosome PAFs" > {log}
         """
