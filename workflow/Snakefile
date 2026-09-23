@@ -1222,11 +1222,12 @@ rule hap_align_chrom:
     one chromosome -- all six of paradoxa's in flight at once failed to
     allocate in 160 GB. Wall time is set by the longest chromosome, which one
     thread aligns on its own.
-    asm20, not asm5: at binata's ~2.8% divergence asm5 aligned 31.9% of hap2
-    against asm20's 59.2% (marker audit, 2026-09-15). --cs for paftools call,
-    --eqx for SyRI.
+    The preset is per species (config hap_align): it decides sensitivity and,
+    for long chromosomes, whether minimap2's 32-bit chaining limit is reached
+    at all. --cs for paftools call, --eqx for SyRI.
     """
     input:
+        approved("hap_align"),
         hap1 = lambda w: samples.loc[w.sample, "assembly_fasta"],
         hap2 = "results/hap_align/{sample}/hap2.fa",
     output:
@@ -1236,9 +1237,11 @@ rule hap_align_chrom:
     benchmark:
         "benchmarks/hap_align/{sample}.{chrom}.tsv",
     threads: 2
+    params:
+        preset = lambda w: param_for(w.sample, "hap_align", "preset"),
     resources:
-        mem_mb = 16000,
-        runtime = 2880,
+        mem_mb = lambda w: resource_for(w.sample, "hap_align", "align_mem_mb"),
+        runtime = lambda w: resource_for(w.sample, "hap_align", "align_runtime"),
     conda:
         "envs/hap_align.yaml"
     shell:
@@ -1246,7 +1249,7 @@ rule hap_align_chrom:
         trap 'rm -f {output.paf}.query.fa' EXIT
         awk -v c={wildcards.chrom} '/^>/ {{keep = (substr($1, 2) == c)}} keep' {input.hap2} > {output.paf}.query.fa
         test -s {output.paf}.query.fa
-        minimap2 -x asm20 -c --eqx --cs -t {threads} -I8G {input.hap1} {output.paf}.query.fa > {output.paf} 2> {log}
+        minimap2 -x {params.preset} -c --eqx --cs -t {threads} -I8G {input.hap1} {output.paf}.query.fa > {output.paf} 2> {log}
         """
 
 

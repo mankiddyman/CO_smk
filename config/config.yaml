@@ -529,3 +529,50 @@ rrna:
   kingdom: euk
   flank_bp: 2000
   merge_gap_bp: 3000
+
+
+# hap2 aligned onto hap1, one job per whole chromosome (rule hap_align_chrom).
+# Feeds the marker audit (assembly SNPs, alignable sequence) and SyRI's
+# rearrangement calls. Nothing in the crossover chain reads it.
+hap_align:
+  _template:
+    # TEMPLATE -- never read by param_for(). Copy it when adding a species and
+    # choose the preset from that species' OWN hap1-vs-hap2 divergence,
+    # measured from a finished PAF (de:f: weighted by block length).
+    preset: asm10          # minimap2: asm5 ~0.1%, asm10 ~1%, asm20 ~5% divergence
+    align_mem_mb: 32000    # one whole chromosome's anchors, not the whole genome's
+    align_runtime: 1440    # minutes
+
+  Drosera_binata:
+    _approved: "2026-09-23 | 4.89% divergence from its own PAF; asm5-vs-asm20 test in docs/binata_marker_audit.md"
+    # Mean gap-compressed divergence 4.89% over 491.4 Mb aligned. asm20 is the
+    # preset documented for ~5%. Measured 2026-09-15 on this species: asm5
+    # aligned 31.9% of hap2, asm20 59.2%.
+    # 16 chromosomes averaging 43 Mb, so chaining stays well inside minimap2's
+    # int32 anchor limit; observed 3-6 GB and ~10-20 min per chromosome.
+    preset: asm20
+    align_mem_mb: 16000
+    align_runtime: 720
+
+  Drosera_paradoxa:
+    _approved: "2026-09-23 | asm20 aborts on 5 of 6 chromosomes; asm10 measured against it on chr5 and chr3"
+    # asm20 is NOT AVAILABLE here, whatever its sensitivity. Paradoxa's
+    # chromosomes are 200-476 Mb against binata's ~43 Mb, and asm20's 10 bp
+    # minimizer window pushes the anchor count past the int32 ceiling in
+    # mg_chain_backtrack (lchain.c:73). chr1, chr2, chr3, chr4 and chr6 all
+    # aborted; only chr5 finished, in 2h23m. More memory does not help: the
+    # job that failed had peaked at 934 GB and the limit is an index type.
+    # asm10 (19 bp window, roughly half the anchors), measured 2026-09-23:
+    #   chr3  asm20 ABORTED             | asm10 16,910 blocks, 278.9 Mb, 2h51m, 120 GB
+    #   chr5  asm20 10,819 blk, 203.1 Mb| asm10 11,776 blocks, 197.5 Mb, 1h41m,  98 GB
+    # On chr5 asm10 keeps 97.2% of the bases asm20 aligned (97.6% at MAPQ>=60)
+    # in 8.8% more blocks. What it drops is NOT random: mean divergence falls
+    # from 2.14% to 1.82%, so the missing 5.6 Mb is the most divergent
+    # sequence, where sparser seeds fail to chain. That slightly shrinks the
+    # confirmable set behind marker_filters: Drosera_paradoxa, whose audit
+    # table was built on chr5 at asm20 -- re-check it after this alignment.
+    # Chromosomes are aligned WHOLE and never split: splitting would cut the
+    # long alignments SyRI reads and distort breakpoints near every cut.
+    preset: asm10
+    align_mem_mb: 200000   # chr3 peaked at 119.8 GB; chr4 is ~1.7x its length
+    align_runtime: 1440
