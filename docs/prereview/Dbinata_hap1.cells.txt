@@ -1,0 +1,121 @@
+PRE-REVIEW  binata   (/netscratch/dep_mercier/grp_marques/Aaryan/CO_smk/results/starsolo/Dbinata_hap1/Solo.out)
+
+1. CHEMISTRY vs CONFIG
+   STAR ran with: --soloStrand Reverse | whitelist 3M-3pgex-may-2023_TRU.txt | features Gene GeneFull
+   sampled 400 isolated genes (2-50 kb, no neighbour within 2 kb); 2,000,000 unique reads
+   sense to their gene    95.3%   (per-gene median  97.8% over 82 genes with >=20 reads)
+   antisense               4.7%
+   genes >=80% sense: 71 | >=80% antisense: 1 | mixed: 10
+   -> reads are SENSE to their genes: --soloStrand Forward counts them.  [CONFIG HAS Reverse -- MISMATCH]
+   where sense reads sit along genes, 5' -> 3':
+     5' flank 1 kb    2.2% ###
+     gene   0- 10%    8.1% ##########
+     gene  10- 20%    6.8% ########
+     gene  20- 30%    5.8% #######
+     gene  30- 40%    4.8% ######
+     gene  40- 50%    5.1% ######
+     gene  50- 60%    5.5% #######
+     gene  60- 70%    6.4% ########
+     gene  70- 80%    5.4% #######
+     gene  80- 90%    6.0% #######
+     gene  90-100%   33.3% ########################################
+     3' flank 1 kb   10.6% #############
+   -> piles up at the 3' end:  43.9% in the 3' tenth + 3' flank,  10.2% in the 5' tenth + 5' flank
+
+2. BARCODES (GeneFull UMIs per barcode)
+                                               binata        Spondias
+   barcodes with >=1 UMI                      984,464         186,794
+   >= 100 UMIs                                149,738          26,350
+   >= 300 UMIs                                129,038          11,057
+   >= 500 UMIs                                 39,671           8,707
+   >= 1,000 UMIs                                7,428           4,869
+   >= 2,000 UMIs                                2,712           1,801
+   >= 5,000 UMIs                                  662             222
+   UMI share of the top 1,000                    9.4%           22.1%
+   UMI share of the top 5,000                   19.7%           53.4%
+   UMI share of the top 10,000                  26.0%           69.4%
+   UMI share of the top 20,000                  34.9%           78.9%
+   log10(UMI) histogram: barcodes per 0.1 bin, each library scaled to its own tallest bin
+         UMIs  binata                         Spondias
+            3                                 
+            4  #############                  #
+            5  ##                             
+            6  #                              
+            8  #                              
+           10  #                              
+           13                                 
+           16                                 
+           20                                 
+           25                                 
+           32                                 #
+           40                                 ###
+           50                                 #############
+           63                                 #############################
+           79                                 ##############################
+          100                                 ############
+          126                                 ######
+          158  #                              ####
+          200  ###                            ##
+          251  ###############                ##
+          316  ############################## ## <- ambient hump
+          398  ############################   ##
+          501  ##############                 ##
+          631  ######                         ##
+          794  ###                            ##
+        1,000  ##                             ##
+        1,259  #                              ##
+        1,585  #                              #
+        1,995  #                              #
+        2,512                                 #
+        3,162                                 #
+        3,981                                 
+        5,012                                 
+        6,310                                 
+        7,943                                 
+       10,000                                 
+       12,589                                 
+       15,849                                 
+       19,953                                 
+       25,119                                 
+       31,623                                 
+       39,811                                 
+       50,119                                 
+   ambient hump peaks at ~354 UMIs (binata), ~70 (Spondias)
+
+3. AMBIENT (rDNA gene models excluded from the profiles)
+   groups: ambient = 177-354 UMIs, outside the band (n=19,398) | band = 300-500 UMIs (n=89,620)
+           top = the 2,001 barcodes with >= 2,477 UMIs
+   profile similarity (Hellinger affinity, 1 = identical):
+     300-500 band vs ambient       0.984
+     300-500 band vs top barcodes  0.898
+     ambient vs top barcodes       0.885
+   -> the 300-500 band looks like AMBIENT, not like the top barcodes
+   top genes, ambient:      g28895_rnasupp 5.7%  g6232_rnasupp 4.6%  g18573_rnasupp 3.1%  g29031_rnasupp 3.1%  g28391_rnasupp 1.6%  g30912_rnasupp 1.4%
+   top genes, top barcodes: g28391_rnasupp 10.5%  g30912_rnasupp 3.5%  g6232_rnasupp 2.4%  g9519_rnasupp 1.1%  g28895_rnasupp 0.9%  g24430_rnasupp 0.7%
+
+4. CONTAMINATION (~354 ambient UMIs in every droplet, ~50/50 hap1/hap2)
+   nucleus UMIs   ambient share   expected wrong-allele reads
+            500           71.0%    35.5%
+          1,000           35.5%    17.7%
+          2,000           17.7%     8.9%
+          4,000            8.9%     4.4%
+          8,000            4.4%     2.2%
+         16,000            2.2%     1.1%
+   -> <=20% ambient needs >= 1,774 UMIs; 3,232 barcodes reach it (binata)
+
+5. BY UMI BIN (GeneFull)        barcodes   intronic share      rDNA-gene share
+   30-100                              984    26.1%               94.4%
+   100-300                          20,700    18.6%               96.1%
+   300-500                          89,367    17.6%               96.8%
+   500-1,000                        32,243    17.7%               96.3%
+   1,000-2,000                       4,716    20.1%               92.2%
+   2,000-5,000                       2,050    19.1%               93.8%
+   5,000+                              662    16.4%               97.8%
+   (intronic share = 1 - Gene/GeneFull UMIs; rDNA genes: 29 models overlap the blacklist, 29 found in the matrix)
+
+DECISION INPUTS
+   !! STRAND: the matrices were counted with --soloStrand Reverse, but the reads are sense to their genes.
+   !! The counts above come from the 4.7% of gene reads on the other strand. Recount with
+   !! --soloStrand Forward before cell calling; genotypes (allele counts) are unaffected.
+   default_lower: ~354 UMIs, the top of the ambient hump
+   contamination floor for genotyping: >= 1,774 UMIs (<=20% ambient) -> record it for cell_qc
