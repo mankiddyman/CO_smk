@@ -202,9 +202,18 @@ def starsolo_params_for(sample_id):
                 "whitelist": config["whitelist_5p_v1"],
                 "strand": "Reverse"}
     elif chem == "10x_3p_v4":
+        # Forward: a 3' kit's cDNA read is sense to the mRNA. This branch said
+        # Reverse until 2026-09-23, copied from the 5' branch above, and
+        # STARsolo then counts only reads ANTISENSE to their genes. Measured
+        # on binata (qc/strandtest, 50 M read pairs counted both ways, and
+        # docs/prereview/Dbinata_hap1.cells.txt): 95.3% of reads lie on the
+        # same strand as the gene they overlap, piling at 3' ends, and with
+        # the 29 rDNA gene models set aside Forward counts 19.2x the UMIs of
+        # Reverse (6,239,247 vs 324,563). 10x_5p_v1 keeps Reverse: there the
+        # cDNA read is antisense, and Spondias and Cuscuta are unaffected.
         return {"cb_len": 16, "umi_len": 12,
                 "whitelist": config["whitelist_3p_v4"],
-                "strand": "Reverse"}
+                "strand": "Forward"}
     else:
         raise ValueError(f"Unknown chemistry for {sample_id}: {chem!r}")
 
