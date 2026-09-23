@@ -106,6 +106,70 @@ marker_filters:
     # block_size, 1.2x max/min density across chromosomes, implied het 1.5675%
     # genome-wide (1.68% within alignable sequence).
 
+  Drosera_paradoxa:
+    _approved: "2026-09-23 | its own depth and ALT-ratio distributions, confirmed on chr5; docs/paradoxa_marker_audit.md"
+    # Audited 2026-09-23 from Dparadoxa_hap1's OWN hifi_raw.vcf.gz (38,343,168
+    # records, 98.0% SNPs; 37,314,339 biallelic het SNPs) against the chr5
+    # hap2-on-hap1 alignment. Binata's values deliberately NOT inherited: this
+    # library's artefact population is larger and reaches further up the ALT
+    # ratio. Workings: docs/paradoxa_marker_audit.md
+    min_dp: 10
+    # Inert: p1 of het-SNP depth is 20 and DP<10 is 0.3% of calls. Kept at 10
+    # so ascertainment matches the other three species.
+    max_dp: 100
+    # Het-SNP depth p25 45, median 57, p75 75, p90 98, p95 115, p99 158.
+    # 100 = 1.75x median, at p90: above the diploid peak, below the ~114 (2x
+    # median) line where collapsed paralogs start. Binata's 80 is only 1.4x
+    # THIS median and cuts 20.2% of het SNPs, against 4.4% at 118. Yield across
+    # 94-150 varies under 7%, so this is a peak-position choice, not a yield one.
+    min_qual: 30
+    # Costs 1,873 markers (0.01%): 99.9% of the 2.80M QUAL<30 het SNPs are
+    # already removed by depth or ALT ratio. Kept as a backstop.
+    min_alt_ratio: 0.4
+    # NOT 0.3. The shelf is bimodal in depth, so BOTH artefact mechanisms run:
+    #   depth band        n       ratio<0.3   ratio 0.4-0.6
+    #   <=45        9,050,840     53.7%       24.2%    reference bias
+    #   45-57       8,942,113     21.0%       55.7%    the diploid peak
+    #   57-75       9,795,294     33.5%       45.9%
+    #   75+         9,526,092     53.5%       16.5%    collapsed paralogs
+    # Median depth is 55 at the 0.5 peak but 111 in the 0.80-0.85 ratio bin:
+    # the same paralogs push the ratio up as well as down.
+    # Confirmed against the chr5 assembly alignment (111.4 Mb alignable in
+    # blocks >=50 kb, 757,782 assembly SNVs; plateau 83.4% is the alignment's
+    # own sensitivity ceiling; est. real = confirmed / plateau):
+    #   ratio        n (genome)   confirmed   est. real
+    #   0.10-0.15     2,999,279     1.1%        1.3%
+    #   0.15-0.20     4,406,302     1.9%        2.3%
+    #   0.20-0.25     4,032,297     4.0%        4.8%
+    #   0.25-0.30     3,677,590     9.2%       11.0%
+    #   0.30-0.35     3,287,750    20.4%       24.5%
+    #   0.35-0.40     3,131,628    41.2%       49.4%
+    #   0.40-0.45     3,683,745    64.8%       77.7%
+    #   0.45-0.50     3,553,236    77.4%       92.8%
+    #   0.50-0.60     5,887,665    83.2%      ceiling
+    #   0.60-0.65     1,292,990    78.7%       94.3%
+    #   0.65-0.70       681,148    72.2%       86.5%
+    #   0.70-0.85       653,477    67.0%       80.5%
+    # Binata's 0.3 sat where ITS trade flipped (0.30-0.40 was 81% real there).
+    # Here 0.30-0.35 buys ~806k real for ~2.48M artefact (1:3) and 0.35-0.40
+    # ~1.55M for ~1.58M (1:1); 0.40-0.45 is ~2.86M for ~821k (3.5:1). The flip
+    # is at 0.40. Artefacts cluster spatially in divergent and repetitive
+    # sequence, so they give CORRELATED wrong genotypes across cells: false
+    # crossovers, not noise. Paradoxa is nowhere near marker-limited.
+    max_alt_ratio: 0.7
+    # As for the other three species. 0.60-0.70 is 86-94% real and kept;
+    # 0.70-0.85 is ~80% real but only ~525k markers, dropped so ascertainment
+    # stays identical across species. The window is asymmetric about 0.5
+    # because the mechanisms are: reference bias can only push the ratio down.
+    gap_flag_bp: 2000000
+    # Provisional: re-check against the chosen block_size at the co_calling
+    # gate. Paradoxa's chromosomes are ~8x binata's, so 2 Mb may not carry over.
+    #
+    # CAVEAT: the confirmation table is chr5 only, the single chromosome whose
+    # hap2 alignment finished before minimap2's 32-bit chaining limit stopped
+    # the other five. chr5 is the least repetitive of the six, so the artefact
+    # fractions above are a LOWER bound. Re-run the audit when the rest land.
+
 
 # STAR alignment params. NOT YET APPLIED to the current Spondias BAM -- setting
 # alignIntronMax requires rebuilding the index and realigning 935M reads, which
