@@ -319,6 +319,11 @@ rule cell_calling:
     input:
         approved("cell_calling"),
         matrix = "results/starsolo/{sample}/Solo.out/GeneFull/raw/matrix.mtx",
+        # Only requested where it is used, so a species calling on the full
+        # matrix does not gain a barrnap dependency it never had.
+        rrna_bed = lambda w: (["results/blacklist/%s/rrna_exclude.bed" % w.sample]
+                              if str(param_for(w.sample, "cell_calling", "exclude_rrna")).lower() == "true"
+                              else []),
     output:
         called = "results/cells/{sample}/barcodes_called.tsv",
         comparison = "results/cells/{sample}/threshold_comparison.tsv",
@@ -335,6 +340,9 @@ rule cell_calling:
         matrix_dir = lambda w: f"results/starsolo/{w.sample}/Solo.out/GeneFull/raw",
         out_dir = lambda w: f"results/cells/{w.sample}",
         default_lower = lambda w: param_for(w.sample, "cell_calling", "default_lower"),
+        exclude_rrna = lambda w: param_for(w.sample, "cell_calling", "exclude_rrna"),
+        fdr = lambda w: param_for(w.sample, "cell_calling", "fdr"),
+        gff = lambda w: samples.loc[w.sample, "annotation_gff"],
     shell:
         """
         Rscript workflow/scripts/cell_calling.R \
@@ -342,7 +350,10 @@ rule cell_calling:
             --out_dir {params.out_dir} \
             --sample {wildcards.sample} \
             --default_lower {params.default_lower} \
-            --fdr 0.001 \
+            --exclude_rrna {params.exclude_rrna} \
+            --rrna_bed "{input.rrna_bed}" \
+            --gff {params.gff} \
+            --fdr {params.fdr} \
             --niters 10000 \
             > {log} 2>&1
         """

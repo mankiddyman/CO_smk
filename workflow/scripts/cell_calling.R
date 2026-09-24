@@ -16,6 +16,12 @@ option_list <- list(
     make_option("--sample", type="character"),
     make_option("--default_lower", type="integer", default=300,
                 help="Default emptyDrops lower threshold for canonical output"),
+    make_option("--exclude_rrna", type="character", default="false",
+                help="Drop rDNA gene models before calling (true/false)"),
+    make_option("--rrna_bed", type="character", default="",
+                help="BED of rRNA loci, from rule rrna_blacklist"),
+    make_option("--gff", type="character", default="",
+                help="Annotation the STAR index was built from, to map BED -> gene rows"),
     make_option("--fdr", type="numeric", default=0.001),
     make_option("--niters", type="integer", default=10000),
     make_option("--seed", type="integer", default=42)
@@ -32,6 +38,43 @@ m <- counts(sce)
 message(sprintf("Matrix: %d genes x %d barcodes, %d non-zero",
                 nrow(m), ncol(m), length(m@x)))
 
+# --- Drop rDNA gene models, if asked ---
+# rRNA is not poly-A depleted and lands on a handful of collapsed-array genes.
+# Those counts are ambient-enriched, so leaving them in lets emptyDrops call
+# ambient droplets as cells (binata 2026-09-24: 71.4% of UMIs, 1,139 such
+# calls). filter_markers already excludes these regions from the marker set,
+# so dropping them here costs no genotype information.
+if (tolower(opt$exclude_rrna) %in% c("true", "yes", "1") &&
+    nzchar(opt$rrna_bed) && nzchar(opt$gff)) {
+    bed <- read.delim(opt$rrna_bed, header = FALSE, comment.char = "#",
+                      colClasses = "character")
+    names(bed)[1:3] <- c("chrom", "start", "end")
+    bed$start <- as.numeric(bed$start); bed$end <- as.numeric(bed$end)
+    g <- read.delim(opt$gff, header = FALSE, comment.char = "#", quote = "",
+                    col.names = paste0("V", 1:9), colClasses = "character")
+    g <- g[g$V3 == "gene", ]
+    gid <- sub(".*(^|;)ID=([^;]+).*", "\\2", g$V9)
+    gs <- as.numeric(g$V4); ge <- as.numeric(g$V5)
+    hit <- rep(FALSE, nrow(g))
+    for (i in seq_len(nrow(bed))) {
+        hit <- hit | (g$V1 == bed$chrom[i] & gs <= bed$end[i] & ge > bed$start[i])
+    }
+    ids <- unique(gid[hit])
+    rn <- rownames(m)
+    drop <- which(rn %in% ids | sub(".*:", "", rn) %in% sub(".*:", "", ids))
+    message(sprintf("rDNA exclusion: %d gene models overlap the blacklist, %d matched in the matrix",
+                    length(ids), length(drop)))
+    if (length(drop) > 0) {
+        before <- sum(m)
+        m <- m[-drop, , drop = FALSE]
+        message(sprintf("  dropped %.1f%% of UMIs (%s of %s); %d genes remain",
+                        100 * (1 - sum(m) / before), format(before - sum(m), big.mark = ","),
+                        format(before, big.mark = ","), nrow(m)))
+    } else {
+        warning("exclude_rrna requested but no gene rows matched -- calling on the full matrix")
+    }
+}
+
 totals <- colSums(m)
 
 # --- barcodeRanks ---
@@ -45,7 +88,9 @@ knee_called <- names(totals)[totals >= knee_val]
 inflection_called <- names(totals)[totals >= inflection_val]
 
 # --- emptyDrops at multiple thresholds ---
-ed_thresholds <- c(100, 300, 500, 1000)
+# default_lower is always swept, so a measured value need not be one of the
+# canonical four (it used to only SELECT among them).
+ed_thresholds <- sort(unique(c(100, 300, 500, 1000, opt$default_lower)))
 ed_results <- list()
 for (lo in ed_thresholds) {
     set.seed(opt$seed)

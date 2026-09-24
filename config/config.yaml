@@ -340,6 +340,16 @@ cell_snp:
     _approved: "PINNED 2026-09-21 | recorded cell_snp_counting params 2026-08-05: 20"
     min_mapq: 20
 
+  Drosera_binata:
+    _approved: "2026-09-24 | STAR gives unique alignments MAPQ 255; 20 keeps uniques and drops multimappers"
+    # Same value as the other three species, for the same reason: STAR scores
+    # unique alignments 255 and multimappers <= 3, so any threshold between
+    # separates them cleanly. 58.1% of this library's reads are multimappers
+    # (rDNA arrays, TE-derived models) and carry no usable allele information.
+    # filter_bam_uniq applies the IDENTICAL value up front, which is what makes
+    # that prefilter output-equivalent rather than a second filter.
+    min_mapq: 20
+
 # Stage 2 - cell calling (EmptyDrops/knee)
 # default_lower: UMI floor below which barcodes are treated as ambient. Was
 # hardcoded 300 in the rule until 2026-08-05.
@@ -356,14 +366,63 @@ cell_calling:
     # transcriptionally quiescent mature pollen, but that softness is
     # inconsequential here.
     default_lower: 300
+    exclude_rrna: false     # drop rDNA gene models before calling; decide per species
+    fdr: 0.001              # emptyDrops FDR for the canonical barcode list
 
   Cuscuta_epithymum:
     _approved: "PINNED 2026-09-21 | barcodes_called.tsv identical to the lower300 set"
     default_lower: 300
+    # exclude_rrna and fdr added 2026-09-24 when the rule gained them, at the
+    # values this species ACTUALLY RAN WITH, so the pinned outputs stand.
+    # Snakemake had no recorded params for results/cells/6303_B_hap1/* anyway,
+    # so the new keys cannot retrigger it. The audit trail is this block plus
+    # git, not snakemake metadata.
+    exclude_rrna: false
+    fdr: 0.001
 
   Spondias_tuberosa:
     _approved: "PINNED 2026-09-21 | recorded cell_calling params 2026-08-05: 300"
     default_lower: 300
+    # As for Cuscuta: the values it ran with, written out 2026-09-24 because
+    # param_for is strict and the rule now reads them. Its recorded params for
+    # results/cells/Spondias_hap1/* were wiped with --cleanup-metadata the same
+    # day, or adding these keys would have retriggered cell_calling ->
+    # select_cells -> co_calling -> the reported landscape (153 cells, 1740
+    # COs, 1137 cM). Its cell calls were insensitive to the threshold anyway:
+    # 100/300/500/1000 all gave the identical final result.
+    exclude_rrna: false
+    fdr: 0.001
+
+  Drosera_binata:
+    _approved: "2026-09-24 | its own ambient hump on Forward counts; docs/prereview/Dbinata_hap1.cells.forward.txt"
+    default_lower: 177
+    # The ambient hump on NON-rDNA UMIs, i.e. where the empty-droplet
+    # population tops out; barcodeRanks agrees (knee 180). This is emptyDrops'
+    # ambient POOL, not a cell threshold -- the cell edge is the steeper knee
+    # at ~822 UMIs / rank 5,328, which emptyDrops finds for itself. With rDNA
+    # left in, the same hump sits at 707 (knee 712): a 4x shift caused
+    # entirely by ambient rRNA.
+    exclude_rrna: true
+    # rDNA models are 71.4% of this library's UMIs. Comparison at FDR 0.01:
+    #                         cells   median UMI   above genotyping floor
+    #   all genes, lower 707  9,515        2,111    4,742 (non-rDNA >=885)
+    #   rDNA dropped, l. 177 13,404          606    4,852
+    # Nearly identical genotypable yield, but the all-genes run adds 1,139
+    # barcodes the other does not, and those are indistinguishable from
+    # depth-matched REJECTS (cell-minus-ambient affinity -0.068 vs -0.066;
+    # intronic 30.2% vs ambient's 28.1%): ambient called as cells because most
+    # of the profile was rRNA. The 5,028 unique to the rDNA-dropped run are the
+    # opposite (-0.017, less ambient-like than controls at greater depth).
+    # A precision change, not a yield change.
+    fdr: 0.01
+    # Looser than the 0.001 Spondias ran, deliberately. cell_qc rejects ambient
+    # on SWITCH RATE -- a haploid nucleus follows one haplotype and switches
+    # only at crossovers, ambient carries both everywhere -- which is far
+    # stronger evidence than an expression profile at a few hundred UMIs. The
+    # errors are asymmetric: a wrongly included barcode is caught downstream
+    # and costs some cellsnp compute, a wrongly excluded nucleus never returns.
+    # On Spondias, cells admitted at looser cell_qc thresholds contributed
+    # crossovers at the SAME rate (COs/cell 11.27-11.40 across the sweep).
 
 # Stage 3 — cell QC thresholds
 cell_qc:
