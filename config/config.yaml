@@ -246,17 +246,27 @@ star:
     bam_sort_threads: 1   # hpc09 strict overcommit: 6 sort threads reserved ~145 GiB and died 2026-09-21; one thread peaks ~75 GiB (38 GiB STAR + 37 GiB largest bin)
 
   Drosera_paradoxa:
+    _approved: "2026-09-24 | intron cap measured on its own GFF3; index and sort sized for 2.174 Gb"
     sa_index_nbases: 14     # hap1 2.174 Gb -> formula gives 14 (the ceiling)
     sjdb_overhang: 99       # R2 is 100 bp
     index_mem_mb: 110000    # 2.17 Gb genome; 64 GB is not enough. Now ALSO
                             # passed to STAR as --limitGenomeGenerateRAM, whose
                             # own default of 31 GB would have failed here.
     index_runtime: 600
-    # NOT YET MEASURED. Run the same intron extraction against paradoxa's
-    # annotation before trusting this value -- 2.17 Gb over 6 chromosomes is a
-    # different scale again, and inheriting a measurement made on another
-    # species is the mistake this repo has now made twice (Cuscuta's max_dp on
-    # binata; Spondias's intron cap here).
+    # Measured 2026-09-24 from paradoxa's OWN annotation.gff3 (116,737 exon
+    # gaps across 51,904 transcripts), beside binata's:
+    #             p50   p99     p99.9    max       >20kb
+    #   binata    217   6,206   18,652   158,134   66  (0.0710%)
+    #   paradoxa  201   6,914   19,524   467,527   113 (0.0968%)
+    # The distributions are near-identical, so 20000 is kept on paradoxa's own
+    # evidence rather than inherited: it sits just above p99.9 and clips 113 of
+    # 116,737 annotated introns. The trade is the one in binata's block -- a
+    # lost read costs one marker observation, a misplaced read puts a wrong
+    # allele at a real marker and can be called as a crossover.
+    # NOTE: 47,329 gene models against binata's 15,858 for 3.1x the genome.
+    # Probably TE-derived predictions; they should mostly fail MAPQ anyway, but
+    # it does mean GeneFull covers more of this genome, so UMI counts and rDNA
+    # shares are not comparable between the two species.
     align_intron_max: 20000
     align_mem_mb: 160000
     align_runtime: 1440
@@ -264,7 +274,10 @@ star:
     # If STAR dies at the sort it prints the exact number it needs.
     bam_sort_ram: 128000000000
     sam_mult_nmax: 1
-    bam_sort_threads: 1   # same node, same limit; set before its first alignment
+    bam_sort_threads: 4   # runs on an EXCLUSIVE node, so hpc09's strict-overcommit
+                          # workaround (binata's 1) does not apply. Binata's sort
+                          # took 1h14m single-threaded for 95 GB; this library's
+                          # R2 is 63 GB gzipped, so serial sorting would be hours.
 
   # PINNED to what actually built the existing index. Spondias reads are 90 bp
   # so 89 would be nominally correct, but the index was built at 99 and
