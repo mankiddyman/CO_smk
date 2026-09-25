@@ -513,9 +513,15 @@ cell_qc:
     alt_high: 0.8   # and cell_haploidness; plumbing them through is still open
 
   Drosera_paradoxa:
-    _approved: "2026-09-25 | selected by haploidness; diagnostics in qc/markers and qc/haplotypes"
+    _approved: "2026-09-25 | haploidness >= 0.8 after the co_calling sweep; diagnostics in qc/markers, qc/haplotypes, results/co_sweep"
     select_on: haploidness
-    min_haploidness: 0.6
+    min_haploidness: 0.8
+    # Raised from 0.6 after the co_calling sweep: at marker_num 23 cells below
+    # 0.8 carry 35-50% MORE crossovers than cells >= 0.8 at the same depth
+    # (shallow 3.50 / 3.15 vs 2.62; middle 5.38 / 5.42 vs 3.55; deep 6.75 /
+    # 6.56 vs 4.72), which is noise, not detection power. Cells >= 0.8: ~120,
+    # ~4.0 COs/cell (floor 3.0). binata's dirty tier shows no such excess, so
+    # binata stays at 0.6.
     # Same definition and reasoning as binata. Here only ~1% of barcodes are
     # one nucleus (binata ~9%): the library is dominated by both-haplotype
     # barcodes. The haploid ones are real -- their windows pile at 0 and 1 --
@@ -578,29 +584,53 @@ cell_qc:
 # Stage 3d — CO calling (sliding-block)
 co_calling:
   Drosera_binata:
-    _approved: "2026-09-25 | FIRST PASS at the Spondias-swept values, for a first landscape -- sweep before reporting"
+    _approved: "2026-09-25 | swept marker_num 6/8/12/16/23 x block_size 1/2 Mb on all 1,260 cells; results/co_sweep"
     cell_markers: 200
     # A floor only: cells are chosen upstream by haploidness, and this must
     # not silently drop any of the 1,260.
     block_size: 2000000
-    marker_num: 23
+    marker_num: 8
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
-    # NOT yet swept on binata. Its cells carry more ambient than Spondias's
-    # (haploidness 0.6 = up to ~40% foreign molecules), so base_af / marker_num
-    # are the first things to sweep if crossovers per cell look inflated.
+    # At 23 (the Spondias value) binata was UNDER-called: 6.48 COs/cell against
+    # the obligate floor of 8, 12/16 chromosomes below 0.5, and COs/cell per
+    # chromosome tracking markers per chromosome (Spearman 0.87) -- hapCO needs
+    # >= marker_num markers per block and binata's markers thin out in the
+    # chromosome middles. Informative-markers-only made it WORSE (6.78 -> 4.94
+    # on 100 cells), so the fix is sensitivity, not marker choice.
+    # Sweep at block_size 2 Mb (marker_num 23 / 16 / 12 / 8 / 6):
+    #   COs/cell              ~6.5 / ~8.7 / 10.51 / 12.75 / ~13.9
+    #   chromosomes < 0.5       12 /   10 /     6 /     1 /     1
+    #   close-double share    flat, ~0.20-0.23 at every value
+    # block_size 1 Mb REJECTED: COs/cell climbed without limit even in the
+    # cleanest cells (18 -> 37) and close doubles rose 0.30 -> 0.42.
+    # Noise check at matched depth (COs/cell by haploidness tier within a depth
+    # tertile), marker_num 8: shallow cells 12.35 / 12.61 / 12.80 from the
+    # 0.6-0.7 tier up -- dirty cells are NOT inflated, so all 1,260 are kept.
+    # Clean cells level off near 12 COs/cell (~0.75 per chromosome, ~1.5 per
+    # bivalent). Remaining below 0.5: chr16 (0.38), the smallest chromosome.
+    # 10-28% of calls sit in close pairs at both 12 and 8 -- present at every
+    # setting, not created by this one; watch it.
 
   Drosera_paradoxa:
-    _approved: "2026-09-25 | FIRST PASS at the Spondias-swept values, for a first landscape -- sweep before reporting"
+    _approved: "2026-09-25 | swept marker_num 6/8/12/16/23 x block_size 1/2 Mb; strictest is the only sane one; results/co_sweep"
     cell_markers: 200
     block_size: 2000000
     marker_num: 23
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
-    # As binata. Sparser cells (median 510 molecules over 2.17 Gb), so a
-    # 23-marker block spans tens of Mb here; expect coarse breakpoints.
+    # Unlike binata, more sensitivity buys paradoxa only noise: at 12 (2 Mb)
+    # COs/cell doubles to 8.92 while 56-71% of calls per chromosome sit in
+    # close pairs (24-39% at 23), and dirty cells beat clean ones at every
+    # step. Close doubles are only mildly enriched at the translocation
+    # breakpoints (14% of them vs 9% of the genome), so unbalanced gametes are
+    # not the main source; noise in the dirtier cells is -- see
+    # cell_qc.Drosera_paradoxa.min_haploidness. Sparse cells (median ~500
+    # molecules over 2.17 Gb): a 23-marker block spans tens of Mb, so
+    # breakpoints are coarse. Feeding hapCO one row per molecule is the fix
+    # that could recover the dirtier cells; not done yet.
 
   _template:
     # !! marker QC flags gaps against marker_filters.gap_flag_bp, not this block_size -- re-check marker gaps against the chosen block_size before stamping
