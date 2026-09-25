@@ -141,11 +141,11 @@ def rates(npair, nsw, min_pairs=50):
 
 everything = np.ones(len(dp), dtype=bool)
 on_good = good[s_dp]
-r_all = rates(*pairs(everything))
-r_good = rates(*pairs(on_good))
-r_good_far = rates(*pairs(on_good, lo=FAR))
-r_near = rates(*pairs(everything, hi=NEAR))
-r_far = rates(*pairs(everything, lo=FAR))
+P = {"all": pairs(everything), "good": pairs(on_good), "good_far": pairs(on_good, lo=FAR),
+     "near": pairs(everything, hi=NEAR), "far": pairs(everything, lo=FAR)}
+r_all, r_good, r_good_far = rates(*P["all"]), rates(*P["good"]), rates(*P["good_far"])
+r_near, r_far = rates(*P["near"]), rates(*P["far"])
+n_good_markers = np.bincount(c_dp[on_good & (call >= 0)], minlength=ncell)
 
 say()
 say("SAME READ vs DIFFERENT MOLECULES (all markers, per-cell medians)")
@@ -237,6 +237,16 @@ fig.suptitle("%s: marker behaviour along the genome (2 Mb windows; x in Mb)" % S
 fig.tight_layout()
 fig.savefig(os.path.join(OUT, "marker_tracks.png"), dpi=120)
 
+bcf = os.path.join(SNP, "cellSNP.samples.tsv")
+barcodes = [l.strip() for l in open(bcf)] if os.path.exists(bcf) else ["cell%d" % i for i in range(ncell)]
+percell = {"barcode": barcodes[:ncell],
+           "called": np.bincount(c_dp[call >= 0], minlength=ncell)}
+for k, (npair, nsw) in P.items():
+    percell[k + "_pairs"] = npair
+    percell[k + "_switches"] = nsw
+    percell[k + "_rate"] = rates(npair, nsw)
+pd.DataFrame(percell).to_csv(os.path.join(OUT, "cell_switches.tsv.gz"), sep="\t", index=False)
+
 pd.DataFrame({"chrom": sites["chrom"], "pos": spos, "confirmed": conf, "cells_called": called,
               "alt_frac": altf, "both_frac_dp2": bothf,
               "class": np.select([good, sticky, paralog, other], ["good", "sticky", "paralog", "other"],
@@ -244,4 +254,4 @@ pd.DataFrame({"chrom": sites["chrom"], "pos": spos, "confirmed": conf, "cells_ca
     os.path.join(OUT, "marker_classes.tsv.gz"), sep="\t", index=False)
 with open(os.path.join(OUT, "marker_segregation.txt"), "w") as f:
     f.write("\n".join(say_lines) + "\n")
-say("\nwrote %s/{marker_segregation.png,.pdf,.txt, marker_tracks.png, marker_classes.tsv.gz}" % OUT)
+say("\nwrote %s/{marker_segregation.png,.pdf,.txt, marker_tracks.png, marker_classes.tsv.gz, cell_switches.tsv.gz}" % OUT)
