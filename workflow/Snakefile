@@ -960,11 +960,98 @@ rule switch_diagnostics:
 
 
 
+rule marker_classes:
+    """Per-marker behaviour across cells: good / sticky / paralog-like.
+
+    In a pool of haploid meiotic products half the nuclei inherit hap2 at any
+    locus, so an informative marker reads ALT in ~50% of cells. 'sticky'
+    markers read one allele in nearly every cell and carry no haplotype
+    information; 'paralog-like' ones show both alleles inside single cells.
+    Measured 2026-09-25 on markers seen in >= 20 cells: binata 46% good /
+    38% sticky, paradoxa 56% / 29%. Only 'good' markers feed
+    cell_haploidness. Also writes the diagnostic plots. Runs in the
+    snakemake env (numpy / pandas / matplotlib)."""
+    input:
+        dp = "results/snps/{sample}/cellSNP.tag.DP.mtx",
+        ad = "results/snps/{sample}/cellSNP.tag.AD.mtx",
+        sites = "results/snps/{sample}/cellSNP.base.vcf.gz",
+        barcodes = "results/snps/{sample}/cellSNP.samples.tsv",
+    output:
+        classes = "qc/markers/{sample}/marker_classes.tsv.gz",
+    log: "logs/marker_classes/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 48000,
+        runtime = 120,
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        python workflow/scripts/marker_segregation.py {wildcards.sample} none \
+            qc/markers/{wildcards.sample} > {log} 2>&1
+        """
+
+
+rule cell_haploidness:
+    """Does each barcode carry ONE haploid genome?
+
+    On good markers only: calls closer than 150 bp are one molecule (usually
+    one read); each chromosome is cut into consecutive runs of 15 molecules;
+    haploidness = mean over runs of |2f - 1|, f = the run's ALT share.
+    1 = one clean haplotype; ~0.2 = both haplotypes 50:50. For one haploid
+    nucleus whose molecules are a share a foreign, E[haploidness] = 1 - a.
+    Also writes haploidness.png and example_tracks.png."""
+    input:
+        classes = "qc/markers/{sample}/marker_classes.tsv.gz",
+        dp = "results/snps/{sample}/cellSNP.tag.DP.mtx",
+        ad = "results/snps/{sample}/cellSNP.tag.AD.mtx",
+        sites = "results/snps/{sample}/cellSNP.base.vcf.gz",
+        barcodes = "results/snps/{sample}/cellSNP.samples.tsv",
+    output:
+        table = "qc/haplotypes/{sample}/haplotype_tracks.tsv.gz",
+    log: "logs/cell_haploidness/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 48000,
+        runtime = 120,
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        python workflow/scripts/haplotype_tracks.py {wildcards.sample} \
+            qc/haplotypes/{wildcards.sample} > {log} 2>&1
+        """
+
+
+def _select_on(w):
+    return param_for(w.sample, "cell_qc", "select_on")
+
+
+def _cellqc_for(mode, key):
+    """A cell_qc value, read only for the selection mode that uses it, so a
+    species need not carry keys its mode ignores (param_for is strict)."""
+    return lambda w: param_for(w.sample, "cell_qc", key) if _select_on(w) == mode else ""
+
+
 rule select_cells:
-    """Apply cell QC thresholds to identify cells suitable for CO calling."""
+    """Choose the cells crossovers are called in; mode per species
+    (cell_qc.<species>.select_on):
+
+    switch_rate  the original path (Cuscuta, Spondias; pinned): select_cells.R
+                 on switch_diagnostics -- min_total_markers,
+                 min_per_chrom_markers, max_switch_rate.
+    haploidness  (Drosera, 2026-09-25) barcodes whose informative markers
+                 follow ONE haplotype: haploidness >= min_haploidness with
+                 >= min_windows full windows, from cell_haploidness.
+
+    WHY two modes: in the Drosera libraries ~70-75% of neighbouring marker
+    pairs sit on one read and agree automatically, so the all-marker switch
+    rate mostly measured read clustering and depth. Pairs on different
+    molecules disagree ~40% in the typical barcode -- most barcodes hold
+    both haplotypes -- which that rate could not see."""
     input:
         approved("cell_qc"),
-        switches = "results/cell_qc/{sample}/switches.tsv",
+        table = lambda w: ("qc/haplotypes/%s/haplotype_tracks.tsv.gz" % w.sample
+                           if _select_on(w) == "haploidness"
+                           else "results/cell_qc/%s/switches.tsv" % w.sample),
     output:
         good_cells = "results/cell_qc/{sample}/good_cells.tsv",
         summary = "results/cell_qc/{sample}/selection_summary.txt",
@@ -975,19 +1062,28 @@ rule select_cells:
         runtime = 10,
     conda: "envs/cell_qc.yaml"
     params:
-        min_total = lambda w: param_for(w.sample, "cell_qc", "min_total_markers"),
-        min_per_chrom = lambda w: param_for(w.sample, "cell_qc", "min_per_chrom_markers"),
-        max_sr = lambda w: param_for(w.sample, "cell_qc", "max_switch_rate"),
+        select_on = _select_on,
+        min_total = _cellqc_for("switch_rate", "min_total_markers"),
+        min_per_chrom = _cellqc_for("switch_rate", "min_per_chrom_markers"),
+        max_sr = _cellqc_for("switch_rate", "max_switch_rate"),
+        min_hap = _cellqc_for("haploidness", "min_haploidness"),
+        min_win = _cellqc_for("haploidness", "min_windows"),
     shell:
         """
-        Rscript workflow/scripts/select_cells.R \
-            --switches {input.switches} \
-            --out {output.good_cells} \
-            --out_summary {output.summary} \
-            --min_total_markers {params.min_total} \
-            --min_per_chrom_markers {params.min_per_chrom} \
-            --max_switch_rate {params.max_sr} \
-            > {log} 2>&1
+        if [ "{params.select_on}" = "haploidness" ]; then
+            Rscript workflow/scripts/select_haploid_cells.R {input.table} \
+                {output.good_cells} {output.summary} {params.min_hap} {params.min_win} \
+                > {log} 2>&1
+        else
+            Rscript workflow/scripts/select_cells.R \
+                --switches {input.table} \
+                --out {output.good_cells} \
+                --out_summary {output.summary} \
+                --min_total_markers {params.min_total} \
+                --min_per_chrom_markers {params.min_per_chrom} \
+                --max_switch_rate {params.max_sr} \
+                > {log} 2>&1
+        fi
         """
 
 

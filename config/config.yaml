@@ -487,10 +487,54 @@ cell_qc:
     min_total_markers: 2500
     min_per_chrom_markers: 40
     max_switch_rate: 0.09
+    select_on: switch_rate   # or haploidness -- see rule select_cells
+    min_haploidness: 0.6     # haploidness mode only
+    min_windows: 10          # haploidness mode only
+
+  Drosera_binata:
+    _approved: "2026-09-25 | selected by haploidness; diagnostics in qc/markers and qc/haplotypes"
+    select_on: haploidness
+    min_haploidness: 0.6
+    # haploidness = mean over 15-molecule windows of |2f - 1| on informative
+    # markers. For one haploid nucleus whose molecules are a share a foreign it
+    # equals 1 - a, so 0.6 admits up to ~40% foreign molecules -- where a
+    # 15-molecule majority is still wrong < 0.5% of the time.
+    # max_switch_rate is NOT used: ~70-75% of neighbouring marker pairs sit on
+    # one read and agree automatically, so that rate measured read clustering
+    # and depth, not purity. Pairs on different molecules disagree ~40% in the
+    # typical barcode: most barcodes hold both haplotypes (flat 50:50 tracks,
+    # among the deepest barcodes -- several nuclei, not empty droplets).
+    # Haploid cells form an arm in depth x far-pair-rate space that follows
+    # ambient dilution; doublets are negligible (22 of the kept cells have
+    # > 20% mid windows). Crossover blocks visible in qc/haplotypes/*/example_tracks.png.
+    # RESULT: 1,260 of 13,681 called barcodes (9.2%), median 1,464 molecules.
+    min_windows: 10
+    ref_low: 0.2    # the same 0.2 / 0.8 calls are hardcoded in marker_classes
+    alt_high: 0.8   # and cell_haploidness; plumbing them through is still open
+
+  Drosera_paradoxa:
+    _approved: "2026-09-25 | selected by haploidness; diagnostics in qc/markers and qc/haplotypes"
+    select_on: haploidness
+    min_haploidness: 0.6
+    # Same definition and reasoning as binata. Here only ~1% of barcodes are
+    # one nucleus (binata ~9%): the library is dominated by both-haplotype
+    # barcodes. The haploid ones are real -- their windows pile at 0 and 1 --
+    # but shallower (median 510 molecules), so crossovers are placed to
+    # tens of Mb rather than binata's ~8 Mb.
+    # TRANSLOCATIONS: the genetic contact map (qc/haplotypes/Dparadoxa_hap1)
+    # links chr5-chr6 (r = 1.00, 140 cells) and chr3-chr4 (r = 0.96, 47
+    # cells). Balanced (alternate-segregation) gametes put NO switch at a
+    # breakpoint in hap1 coordinates, so crossover calling is unchanged; a
+    # pile-up of calls at one position would flag unbalanced gametes.
+    # RESULT: 285 of 25,111 called barcodes (1.1%), median 510 molecules.
+    min_windows: 10
+    ref_low: 0.2
+    alt_high: 0.8
 
   Cuscuta_epithymum:
     _approved: "PINNED 2026-09-21 | produced the reported figures (373 COs, 90 cells)"
     # PINNED: reported figures.
+    select_on: switch_rate   # as it ran; added 2026-09-25 when select_cells gained a mode
     ref_low: 0.2
     alt_high: 0.8
     min_total_markers: 2500
@@ -499,6 +543,7 @@ cell_qc:
 
   Spondias_tuberosa:
     _approved: "PINNED 2026-09-21 | recorded select_cells params 2026-08-05: 0.12/30/800"
+    select_on: switch_rate   # as it ran; added 2026-09-25 when select_cells gained a mode
     # Set 2026-08-04 from switch_diagnostics on 1,471,619 markers (max_dp=150).
     # 8,497 cells: median 531 markers/cell, DP mean 1.20 (89.5% single-read),
     # switch-rate distribution bimodal -- noise mode at ~0.26, clean haploid
@@ -532,6 +577,31 @@ cell_qc:
 
 # Stage 3d — CO calling (sliding-block)
 co_calling:
+  Drosera_binata:
+    _approved: "2026-09-25 | FIRST PASS at the Spondias-swept values, for a first landscape -- sweep before reporting"
+    cell_markers: 200
+    # A floor only: cells are chosen upstream by haploidness, and this must
+    # not silently drop any of the 1,260.
+    block_size: 2000000
+    marker_num: 23
+    base_af: 0.3
+    window_af: 0.4
+    genotype: 0.2
+    # NOT yet swept on binata. Its cells carry more ambient than Spondias's
+    # (haploidness 0.6 = up to ~40% foreign molecules), so base_af / marker_num
+    # are the first things to sweep if crossovers per cell look inflated.
+
+  Drosera_paradoxa:
+    _approved: "2026-09-25 | FIRST PASS at the Spondias-swept values, for a first landscape -- sweep before reporting"
+    cell_markers: 200
+    block_size: 2000000
+    marker_num: 23
+    base_af: 0.3
+    window_af: 0.4
+    genotype: 0.2
+    # As binata. Sparser cells (median 510 molecules over 2.17 Gb), so a
+    # 23-marker block spans tens of Mb here; expect coarse breakpoints.
+
   _template:
     # !! marker QC flags gaps against marker_filters.gap_flag_bp, not this block_size -- re-check marker gaps against the chosen block_size before stamping
     # TEMPLATE -- never read by param_for(). Copy it when adding a species

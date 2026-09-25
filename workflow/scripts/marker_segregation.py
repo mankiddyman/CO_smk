@@ -85,13 +85,16 @@ called = n_ref + n_alt
 altf = np.where(called > 0, n_alt / np.maximum(called, 1), np.nan)
 bothf = np.where(n_d2 >= 5, n_both / np.maximum(n_d2, 1), np.nan)
 
-asm = pd.read_csv(ASM, sep="\t", comment="#", header=None, usecols=[0, 1, 3, 4],
-                  names=["chrom", "pos", "ref", "alt"], dtype={0: str})
-asm = asm[(asm["ref"].str.len() == 1) & (asm["alt"].str.len() == 1)]
-asm["ref"] = asm["ref"].str.upper(); asm["alt"] = asm["alt"].str.upper()
-asm["conf"] = True
-conf = sites.merge(asm.drop_duplicates(["chrom", "pos"]), how="left",
-                   on=["chrom", "pos", "ref", "alt"])["conf"].fillna(False).values.astype(bool)
+if ASM.lower() in ("none", "-", ""):
+    conf = np.zeros(len(sites), dtype=bool)   # no assembly check: all markers count as unconfirmed
+else:
+    asm = pd.read_csv(ASM, sep="\t", comment="#", header=None, usecols=[0, 1, 3, 4],
+                      names=["chrom", "pos", "ref", "alt"], dtype={0: str})
+    asm = asm[(asm["ref"].str.len() == 1) & (asm["alt"].str.len() == 1)]
+    asm["ref"] = asm["ref"].str.upper(); asm["alt"] = asm["alt"].str.upper()
+    asm["conf"] = True
+    conf = sites.merge(asm.drop_duplicates(["chrom", "pos"]), how="left",
+                       on=["chrom", "pos", "ref", "alt"])["conf"].fillna(False).values.astype(bool)
 
 judged = called >= MIN_CELLS
 sticky = judged & ((altf < STICKY) | (altf > 1 - STICKY))
