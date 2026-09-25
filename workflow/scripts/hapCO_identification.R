@@ -28,7 +28,11 @@ option_list <- list(
   make_option("--windowAF", type = "double", default = 0.4,
               help = "Smoothing pass-2 threshold [default: %default]"),
   make_option("--genotype", type = "double", default = 0.2,
-              help = "Block genotype threshold [default: %default]")
+              help = "Block genotype threshold [default: %default]"),
+  make_option("--terminal_marker_num", type = "integer", default = 0,
+              help = paste("If > 0, a chromosome's first and last block need only this many",
+                           "markers and no minimum length; interior blocks keep both rules.",
+                           "0 = off [default: %default]"))
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -120,12 +124,22 @@ get_genotype_block <- function(acnt_smoothed) {
   blocks
 }
 
-filter_blocks <- function(blocks, min_block_size, min_marker) {
+filter_blocks <- function(blocks, min_block_size, min_marker, terminal_marker = 0) {
+  # Interior blocks need >= min_block_size bp AND >= min_marker markers: the
+  # length rule is what stops a noise run from becoming a false double
+  # crossover. A chromosome's FIRST and LAST block cannot be a double
+  # crossover -- only one switch -- so with terminal_marker > 0 they need
+  # markers only. Without this (terminal_marker = 0, the original behaviour),
+  # a crossover within min_block_size of a chromosome end is absorbed by the
+  # neighbouring block and disappears.
   new_blocks <- matrix(NA, 0, 4)
   colnames(new_blocks) <- c("sta", "end", "genotype", "markernum")
-  for (row in 1:dim(blocks)[1]) {
-    if (blocks[row, 2] - blocks[row, 1] >= min_block_size &&
-        blocks[row, 4] >= min_marker) {
+  nb <- dim(blocks)[1]
+  for (row in 1:nb) {
+    end_block <- terminal_marker > 0 && (row == 1 || row == nb)
+    keep <- if (end_block) blocks[row, 4] >= terminal_marker else
+      (blocks[row, 2] - blocks[row, 1] >= min_block_size && blocks[row, 4] >= min_marker)
+    if (keep) {
       new_blocks <- rbind(new_blocks, blocks[row, ])
     }
   }
@@ -261,7 +275,7 @@ if (sum(informative) >= opt$cell_markers) {
     total_smoothed <- total_smoothed + length(smt$V1)
 
     blocks <- get_genotype_block(acnt_chr_smoothed)
-    filtered <- filter_blocks(blocks, opt$block_size, opt$marker_num)
+    filtered <- filter_blocks(blocks, opt$block_size, opt$marker_num, opt$terminal_marker_num)
 
     if (nrow(filtered) == 0) {
       # no blocks pass filter — empty plot

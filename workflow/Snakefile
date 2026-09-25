@@ -1113,6 +1113,7 @@ rule co_calling:
         base_af   = lambda w: param_for(w.sample, "co_calling", "base_af"),
         window_af = lambda w: param_for(w.sample, "co_calling", "window_af"),
         genotype  = lambda w: param_for(w.sample, "co_calling", "genotype"),
+        terminal_marker_num = lambda w: param_for(w.sample, "co_calling", "terminal_marker_num"),
     shell:
         r"""
         mkdir -p {params.out_dir}
@@ -1126,6 +1127,7 @@ co_calling parameters:
   baseAF:            {params.base_af}
   windowAF:          {params.window_af}
   genotype:          {params.genotype}
+  terminal_marker_num: {params.terminal_marker_num}
   threads:           {threads}
 EOF
 
@@ -1144,6 +1146,7 @@ EOF
                     --baseAF {params.base_af} \
                     --windowAF {params.window_af} \
                     --genotype {params.genotype} \
+                    --terminal_marker_num {params.terminal_marker_num} \
                     >> {log} 2>&1
             ' _ {{}}
 
