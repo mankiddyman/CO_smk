@@ -654,12 +654,23 @@ co_calling:
     # setting, not created by this one; watch it.
 
   Drosera_paradoxa:
-    input_rows: markers   # as it ran
-    terminal_marker_num: 0   # off -- as it ran
-    _approved: "2026-09-25 | swept marker_num 6/8/12/16/23 x block_size 1/2 Mb; strictest is the only sane one; results/co_sweep"
+    input_rows: molecules
+    terminal_marker_num: 8   # 2 x marker_num: end blocks need 8 molecules, no minimum length
+    _approved: "PROVISIONAL 2026-09-28 | molecule input mn4 on the 50-cell panel; qc/review/Dparadoxa_hap1/support"
+    # PROVISIONAL 2026-09-28: molecule input (informative markers, one row per
+    # molecule), chosen on the 50-cell review panel with block_support.py:
+    #                    COs/cell  islands  UNSUPPORTED islands        missed ends
+    #   markers, mn 23     4.38     1.58    0.58 (0.42 REF-in-ALT)       0.46
+    #   molecules, mn 4    2.98     0.70    0.06                         0.16
+    #   molecules, mn 6    2.46     0.36    0.00                         0.32
+    #   molecules, mn 8    2.06     0.20    0.00                         0.52
+    #   molecules, mn 12   1.52     0.10    0.00                         0.90
+    # mn 6+ fall below the obligate 3.0 COs/cell and miss more ends. mn 4 sits
+    # at the floor itself -- expected while the chr1/chr2 right arms are
+    # unmappable and chr4_hap1 0-85.5 Mb (on chr3_hap2 in hap2) is unhandled.
     cell_markers: 200
     block_size: 2000000
-    marker_num: 23
+    marker_num: 4   # MOLECULES per block (input_rows: molecules)
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
@@ -672,7 +683,7 @@ co_calling:
     # cell_qc.Drosera_paradoxa.min_haploidness. Sparse cells (median ~500
     # molecules over 2.17 Gb): a 23-marker block spans tens of Mb, so
     # breakpoints are coarse. Feeding hapCO one row per molecule is the fix
-    # that could recover the dirtier cells; not done yet.
+    # that could recover the dirtier cells; done 2026-09-28 (input_rows above).
 
   _template:
     input_rows: markers   # or molecules: one row per molecule, informative markers only
