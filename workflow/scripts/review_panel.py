@@ -7,10 +7,12 @@ by) to PNG, stacks multi-page plots into one image, and stamps a banner:
 The cell list is saved per seed, so the SAME panel can be re-rendered after a
 parameter change and compared cell for cell.
 
-Usage: review_panel.py SAMPLE N SEED [PER_CELL_DIR] [LABEL]
+Usage: review_panel.py SAMPLE N SEED [PER_CELL_DIR] [LABEL] [DPI]
   PER_CELL_DIR  default results/crossovers/SAMPLE/per_cell
   LABEL         default pipeline
-Output: qc/review/SAMPLE/LABEL/NN_BARCODE.png and panel.tsv
+  DPI           default 300 (the banner scales with it)
+Output: qc/review/SAMPLE/LABEL/NN_BARCODE.png, a copy of the original vector
+PDF next to each (NN_BARCODE.pdf, for lossless zooming), and panel.tsv
 """
 import os
 import random
@@ -27,7 +29,8 @@ S, N, SEED = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 SRC = sys.argv[4] if len(sys.argv) > 4 else "results/crossovers/%s/per_cell" % S
 LABEL = sys.argv[5] if len(sys.argv) > 5 else "pipeline"
 OUT = os.path.join("qc/review", S, LABEL)
-DPI = 110
+DPI = int(sys.argv[6]) if len(sys.argv) > 6 else 300
+SCALE = DPI / 110.0
 os.makedirs(OUT, exist_ok=True)
 
 if shutil.which("pdftoppm"):
@@ -51,7 +54,7 @@ else:
 ht = pd.read_csv("qc/haplotypes/%s/haplotype_tracks.tsv.gz" % S, sep="\t",
                  usecols=["barcode", "molecules", "haploidness"]).set_index("barcode")
 font_path = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-font = ImageFont.truetype(font_path, 22)
+font = ImageFont.truetype(font_path, int(22 * SCALE))
 
 rows = []
 tmp = tempfile.mkdtemp()
@@ -76,19 +79,20 @@ for i, bc in enumerate(pick, 1):
     text = "%s   |   %02d/%d   |   %s   |   haploidness %s   |   %s molecules   |   %d COs called   |   %s" % (
         S, i, len(pick), bc, "%.2f" % h.haploidness if h is not None else "n/a",
         format(int(h.molecules), ",") if h is not None else "n/a", ncos, LABEL)
-    text_w = int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(text, font=font)) + 40
+    text_w = int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(text, font=font)) + int(40 * SCALE)
     width = max(max(im.width for im in ims), text_w)
-    banner = 56
+    banner = int(56 * SCALE)
     canvas = Image.new("RGB", (width, banner + sum(im.height for im in ims)), "white")
     d = ImageDraw.Draw(canvas)
-    d.rectangle([0, 0, width, banner - 6], fill=(255, 244, 214))
-    d.text((16, 14), text, fill=(20, 20, 20), font=font)
+    d.rectangle([0, 0, width, banner - int(6 * SCALE)], fill=(255, 244, 214))
+    d.text((int(16 * SCALE), int(14 * SCALE)), text, fill=(20, 20, 20), font=font)
     y = banner
     for im in ims:
         canvas.paste(im, (0, y))
         y += im.height
     png = os.path.join(OUT, "%02d_%s.png" % (i, bc))
     canvas.save(png, optimize=True)
+    shutil.copy(pdf, os.path.join(OUT, "%02d_%s.pdf" % (i, bc)))
     for p in pages:
         os.remove(os.path.join(tmp, p))
     rows.append((i, bc, h.haploidness if h is not None else None,
@@ -96,4 +100,4 @@ for i, bc in enumerate(pick, 1):
 shutil.rmtree(tmp, ignore_errors=True)
 pd.DataFrame(rows, columns=["n", "barcode", "haploidness", "molecules", "cos_called", "png"]).to_csv(
     os.path.join(OUT, "panel.tsv"), sep="\t", index=False)
-print("wrote %d PNGs to %s (cell list: %s)" % (len(rows), OUT, panel_file))
+print("wrote %d PNGs at %d dpi (+ the vector PDFs) to %s (cell list: %s)" % (len(rows), DPI, OUT, panel_file))
