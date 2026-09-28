@@ -877,4 +877,5 @@ mapping_reference:
     # hap2) exactly once.
 
 reference_copy_check:
-  max_bad_mb: 20   # Mb of the genome allowed at 0 or 2+ copies before the gate fails
+  max_bad_mb: 20   # Mb allowed in runs (>= 5 Mb) of duplicated or absent sequence; divergent sequence
+                   # with no counterpart anywhere ('unmatched') is reported and never counts
