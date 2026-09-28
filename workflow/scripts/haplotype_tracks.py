@@ -99,6 +99,16 @@ same_run = ~run_new[1:]
 mol_sw = np.bincount(mc[1:][same_run & (mg[1:] != mg[:-1])], minlength=ncell)
 mol_pairs = np.bincount(mc[1:][same_run], minlength=ncell)
 n_mol = np.bincount(mc, minlength=ncell)
+# molecules per cell on each MAIN chromosome (>= 0.5% of all molecules, so a
+# stray scaffold cannot make every cell's weakest chromosome zero)
+share = np.bincount(mch, minlength=len(chrom_names)) / float(nm)
+main = np.where(share >= 0.005)[0]
+per_chrom = np.zeros((ncell, len(chrom_names)), dtype=np.int64)
+np.add.at(per_chrom, (mc, mch), 1)
+pcm = per_chrom[:, main]
+main_names = np.array([str(x) for x in chrom_names])[main]
+min_chrom = pcm.min(axis=1)
+weak_chrom = main_names[pcm.argmin(axis=1)]
 
 # ---- 2. windows
 run_id = np.cumsum(run_new) - 1
@@ -119,12 +129,15 @@ mid_share = np.bincount(w_cell, weights=((w_f > 0.35) & (w_f < 0.65)).astype(flo
 
 bcf = os.path.join(SNP, "cellSNP.samples.tsv")
 bc = [l.strip() for l in open(bcf)] if os.path.exists(bcf) else ["cell%d" % k for k in range(ncell)]
-cell = pd.DataFrame({"barcode": bc[:ncell], "molecules": n_mol, "windows": n_win,
+cell = pd.DataFrame({"barcode": bc[:ncell], "molecules": n_mol, "min_chrom_molecules": min_chrom,
+                     "weakest_chrom": weak_chrom, "windows": n_win,
                      "molecule_switch_rate": np.where(mol_pairs >= 20, mol_sw / np.maximum(mol_pairs, 1), np.nan),
                      "haploidness": np.where(n_win >= MIN_WIN, hap, np.nan),
                      "decisive_windows": np.where(n_win >= MIN_WIN, dec, np.nan),
                      "middle_windows": np.where(n_win >= MIN_WIN, mid_share, np.nan)})
 cell.to_csv(os.path.join(OUT, "haplotype_tracks.tsv.gz"), sep="\t", index=False)
+pd.DataFrame(pcm, columns=main_names).assign(barcode=bc[:ncell]).to_csv(
+    os.path.join(OUT, "haplotype_tracks_per_chrom.tsv.gz"), sep="\t", index=False)
 
 v = cell.dropna(subset=["haploidness"])
 h, e = np.histogram(v.haploidness, bins=np.arange(0, 1.02, 0.02))

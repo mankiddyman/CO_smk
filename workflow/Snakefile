@@ -1068,11 +1068,14 @@ rule select_cells:
         max_sr = _cellqc_for("switch_rate", "max_switch_rate"),
         min_hap = _cellqc_for("haploidness", "min_haploidness"),
         min_win = _cellqc_for("haploidness", "min_windows"),
+        min_mol = _cellqc_for("haploidness", "min_molecules"),
+        min_chrom_mol = _cellqc_for("haploidness", "min_chrom_molecules"),
     shell:
         """
         if [ "{params.select_on}" = "haploidness" ]; then
             Rscript workflow/scripts/select_haploid_cells.R {input.table} \
                 {output.good_cells} {output.summary} {params.min_hap} {params.min_win} \
+                {params.min_mol} {params.min_chrom_mol} \
                 > {log} 2>&1
         else
             Rscript workflow/scripts/select_cells.R \

@@ -490,11 +490,24 @@ cell_qc:
     select_on: switch_rate   # or haploidness -- see rule select_cells
     min_haploidness: 0.6     # haploidness mode only
     min_windows: 10          # haploidness mode only
+    min_molecules: 0         # haploidness mode only: molecules in the cell
+    min_chrom_molecules: 0   # haploidness mode only: molecules on the weakest chromosome
 
   Drosera_binata:
-    _approved: "2026-09-25 | selected by haploidness; diagnostics in qc/markers and qc/haplotypes"
+    _approved: "2026-09-28 | haploidness plus coverage floors set from the 50-cell review panel; qc/review/Dbinata_hap1"
     select_on: haploidness
     min_haploidness: 0.6
+    min_molecules: 1500
+    min_chrom_molecules: 60
+    # Coverage floors, 2026-09-28, from a 50-cell review panel (hapCO's own
+    # per-cell plots): cells with few molecules, or one nearly empty
+    # chromosome, got crossovers called across stretches with no data behind
+    # them (e.g. panel cell 02: 579 molecules). Every chromosome counts in the
+    # landscape's denominator, so the WEAKEST chromosome must carry evidence --
+    # the same logic as Spondias's min_per_chrom_markers.
+    # Kept (total >= / weakest >=):  1000/40 696 | 1500/40 606 | 1500/60 509 |
+    # 2000/60 451 | 3000/any 262 -- of 1,260. 1500 / 60 -> 509 cells.
+    # Molecules = informative markers, calls < 150 bp apart counted once.
     # haploidness = mean over 15-molecule windows of |2f - 1| on informative
     # markers. For one haploid nucleus whose molecules are a share a foreign it
     # equals 1 - a, so 0.6 admits up to ~40% foreign molecules -- where a
@@ -513,9 +526,15 @@ cell_qc:
     alt_high: 0.8   # and cell_haploidness; plumbing them through is still open
 
   Drosera_paradoxa:
-    _approved: "2026-09-25 | haploidness >= 0.8 after the co_calling sweep; diagnostics in qc/markers, qc/haplotypes, results/co_sweep"
+    _approved: "2026-09-28 | haploidness >= 0.8 plus the same weakest-chromosome floor as binata; qc/review/Dparadoxa_hap1"
     select_on: haploidness
     min_haploidness: 0.8
+    min_molecules: 0
+    min_chrom_molecules: 60
+    # The same evidence floor per chromosome as binata (60 molecules on the
+    # weakest). No total floor: with 6 chromosomes, 6 x 60 = 360 is already
+    # implied, and a binata-style 1500 would keep 13 cells. Kept of 124:
+    # weakest >= 40 110 | >= 60 87 | >= 80 61. 60 -> 87 cells.
     # Raised from 0.6 after the co_calling sweep: at marker_num 23 cells below
     # 0.8 carry 35-50% MORE crossovers than cells >= 0.8 at the same depth
     # (shallow 3.50 / 3.15 vs 2.62; middle 5.38 / 5.42 vs 3.55; deep 6.75 /
