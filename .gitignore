@@ -62,3 +62,4 @@ run_*.log
 
 # QC battery outputs (regenerable)
 /qc/
+*.bak_*
