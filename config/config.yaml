@@ -603,19 +603,33 @@ cell_qc:
 # Stage 3d — CO calling (sliding-block)
 co_calling:
   Drosera_binata:
-    terminal_marker_num: 16
+    terminal_marker_num: 8
     # 2 x marker_num. hapCO dropped every block shorter than block_size,
     # including a chromosome's first and last, so crossovers within 2 Mb of
     # an end vanished -- and binata's ends are its gene- and marker-richest
-    # regions; missed terminal crossovers were visible by eye in per-cell
-    # plots (2026-09-25). End blocks now need markers only (16, double the
-    # interior 8, since they give up the length rule); interior unchanged.
-    _approved: "2026-09-25 | swept marker_num 6/8/12/16/23 x block_size 1/2 Mb on all 1,260 cells; results/co_sweep"
+    # regions (2026-09-25). End blocks need MOLECULES only (8, double the
+    # interior 4, since they give up the length rule); interior unchanged.
+    _approved: "2026-09-28 | molecule input scored on the 50-cell review panel; qc/review/Dbinata_hap1/support"
+    input_rows: molecules
+    # One row per molecule, informative markers only (rule cell_data_molecules),
+    # so marker_num below counts MOLECULES. Scored on the review panel with
+    # block_support.py -- every called block judged against the cell's
+    # informative molecules (same 50 cells, seed 2):
+    #                      COs/cell  islands  UNSUPPORTED islands  missed ends
+    #   markers, mn 8        20.72     9.44          3.96              1.86
+    #   molecules, mn 4      14.46     3.74          0.00              0.56
+    #   molecules, mn 6      13.30     3.22          0.00              1.56
+    #   molecules, mn 8      11.74     2.56          0.00              2.92
+    # The marker-input false islands were one-sided (REF-in-ALT 3.76 vs
+    # ALT-in-REF 0.20 per cell): markers reading one allele regardless, and
+    # several markers per read counted as independent. mn 4 removes them all
+    # and misses the fewest ends; its 14.5 COs/cell matches the marker run's
+    # SUPPORTED crossovers (20.72 - 2 x 3.96 = 12.8) plus its missed ends (1.9).
     cell_markers: 200
     # A floor only: cells are chosen upstream by haploidness, and this must
     # not silently drop any of the 1,260.
     block_size: 2000000
-    marker_num: 8
+    marker_num: 4   # MOLECULES per block (input_rows: molecules)
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
@@ -640,6 +654,7 @@ co_calling:
     # setting, not created by this one; watch it.
 
   Drosera_paradoxa:
+    input_rows: markers   # as it ran
     terminal_marker_num: 0   # off -- as it ran
     _approved: "2026-09-25 | swept marker_num 6/8/12/16/23 x block_size 1/2 Mb; strictest is the only sane one; results/co_sweep"
     cell_markers: 200
@@ -660,6 +675,7 @@ co_calling:
     # that could recover the dirtier cells; not done yet.
 
   _template:
+    input_rows: markers   # or molecules: one row per molecule, informative markers only
     terminal_marker_num: 0   # >0: end blocks need this many markers, no min length
     # !! marker QC flags gaps against marker_filters.gap_flag_bp, not this block_size -- re-check marker gaps against the chosen block_size before stamping
     # TEMPLATE -- never read by param_for(). Copy it when adding a species
@@ -698,6 +714,7 @@ co_calling:
     genotype: 0.2
 
   Cuscuta_epithymum:
+    input_rows: markers   # as it ran
     terminal_marker_num: 0   # off -- as it ran
     _approved: "PINNED 2026-09-21 | co_calling_params.txt 2500/2e6/23; smoothing not passed then, so hapCO's defaults (script unchanged since b23f23b, 2026-04-29)"
     base_af: 0.3   # hapCO default, not passed in May
@@ -710,6 +727,7 @@ co_calling:
     marker_num: 23
 
   Spondias_tuberosa:
+    input_rows: markers   # as it ran
     terminal_marker_num: 0   # off -- as it ran
     _approved: "PINNED 2026-09-21 | recorded co_calling params 2026-08-06: 800/1e6/4/0.3/0.4/0.2"
     base_af: 0.3

@@ -1091,6 +1091,38 @@ rule select_cells:
 
 
 
+rule cell_data_molecules:
+    """hapCO input with ONE row per molecule, informative markers only.
+
+    For species with co_calling.<species>.input_rows: molecules. Markers < 150
+    bp apart usually ride on one read, so they are one observation: the run's
+    deepest informative marker is kept with its own counts, and hapCO's
+    marker_num then counts independent molecules. Only informative ('good')
+    markers from marker_classes are used -- markers that read one allele in
+    nearly every cell painted false blocks of that allele (binata review
+    panel, 2026-09-28: pipeline 3.96 unsupported islands per cell, one-sided
+    REF-in-ALT; molecule input 0.00). Written for the selected cells only; the
+    full per-marker tables in results/cell_data stay for diagnostics."""
+    input:
+        good_cells = "results/cell_qc/{sample}/good_cells.tsv",
+        classes = "qc/markers/{sample}/marker_classes.tsv.gz",
+        chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+    output:
+        done = "results/cell_data_mol/{sample}/.done",
+    log: "logs/cell_data_molecules/{sample}.log"
+    threads: 1
+    resources:
+        mem_mb = 8000,
+        runtime = 60,
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        python workflow/scripts/molecule_tables.py {wildcards.sample} {input.good_cells} \
+            results/cell_data_mol/{wildcards.sample} > {log} 2>&1
+        touch {output.done}
+        """
+
+
 rule co_calling:
     """Call crossovers per cell using hapCO_identification.R.
     Runs in parallel across cells via xargs -P {threads}."""
@@ -1098,6 +1130,8 @@ rule co_calling:
         approved("co_calling"),
         good_cells = "results/cell_qc/{sample}/good_cells.tsv",
         chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+        molecules = lambda w: (["results/cell_data_mol/%s/.done" % w.sample]
+                               if param_for(w.sample, "co_calling", "input_rows") == "molecules" else []),
     output:
         marker_file = "results/crossovers/{sample}/.done",
         params_log = "results/crossovers/{sample}/co_calling_params.txt",
@@ -1108,7 +1142,9 @@ rule co_calling:
         runtime = 60,
     conda: "envs/cell_qc.yaml"
     params:
-        cell_data_dir = lambda w: f"results/cell_data/{w.sample}",
+        cell_data_dir = lambda w: ("results/cell_data_mol/%s" % w.sample
+                                   if param_for(w.sample, "co_calling", "input_rows") == "molecules"
+                                   else "results/cell_data/%s" % w.sample),
         out_dir = lambda w: f"results/crossovers/{w.sample}/per_cell",
         cell_markers = lambda w: param_for(w.sample, "co_calling", "cell_markers"),
         block_size = lambda w: param_for(w.sample, "co_calling", "block_size"),
@@ -1131,6 +1167,7 @@ co_calling parameters:
   windowAF:          {params.window_af}
   genotype:          {params.genotype}
   terminal_marker_num: {params.terminal_marker_num}
+  input tables:      {params.cell_data_dir}
   threads:           {threads}
 EOF
 
