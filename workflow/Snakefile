@@ -1428,3 +1428,75 @@ rule hap_align:
         cat {input.pafs} > {output.paf}
         echo "concatenated $(echo {input.pafs} | wc -w) chromosome PAFs" > {log}
         """
+
+
+# ============================================================================
+# Mapping reference and its copy-number gate (2026-09-28, D. paradoxa)
+# ============================================================================
+# Every read in the crossover chain -- HiFi for markers, single-cell for
+# genotypes -- is mapped to ONE haploid reference, the sample's assembly_fasta.
+# That is only valid if it holds every piece of the genome exactly once. Hi-C
+# phasing labels haplotypes consistently within a chromosome but arbitrarily
+# across chromosomes, so with a heterozygous reciprocal translocation 'all of
+# hap1' can hold one arm twice and the other never: no heterozygous markers on
+# either (paradoxa chr1/chr2 right arms). mapping_reference builds a sample's
+# reference from an explicit chromosome list (config: mapping_reference);
+# reference_copy_check verifies any sample's reference against its dual
+# assembly and fails when more than reference_copy_check.max_bad_mb Mb are
+# present 0 or 2+ times.
+MAPREF = {k: v for k, v in (config.get("mapping_reference", {}) or {}).items() if not k.startswith("_")}
+
+
+rule mapping_reference:
+    """A haploid mapping reference cut from the dual assembly by an explicit
+    chromosome list (config: mapping_reference.<sample>.chromosomes): FASTA,
+    index, contigs.txt, GFF3 subset, and a MANIFEST.txt naming the dual
+    assembly and annotation (read from the from_sample's MANIFEST)."""
+    input:
+        manifest = lambda w: os.path.join(os.path.dirname(
+            samples.loc[MAPREF[w.sample]["from_sample"], "assembly_fasta"]), "MANIFEST.txt"),
+    output:
+        fasta = "results/reference/{sample}/genome.fa",
+        fai = "results/reference/{sample}/genome.fa.fai",
+        contigs = "results/reference/{sample}/contigs.txt",
+        gff = "results/reference/{sample}/annotation.gff3",
+        manifest = "results/reference/{sample}/MANIFEST.txt",
+    params:
+        chroms = lambda w: ",".join(MAPREF[w.sample]["chromosomes"]),
+    log: "logs/mapping_reference/{sample}.log"
+    wildcard_constraints:
+        sample = "|".join(MAPREF) if MAPREF else "NO_MAPPING_REFERENCE",
+    resources:
+        mem_mb = 16000,
+        runtime = 60,
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        python workflow/scripts/build_mapping_reference.py {input.manifest} results/reference/{wildcards.sample} \
+            {params.chroms} {wildcards.sample} > {log} 2>&1
+        """
+
+
+rule reference_copy_check:
+    """Every 1 Mb of both haplotypes of the dual assembly must be present
+    exactly once in the sample's mapping reference (assembly_fasta). Writes
+    copy_check.pass only on PASS and exits non-zero on FAIL; the report is
+    qc/reference/<sample>/copy_check.txt either way."""
+    input:
+        dual = hap_source,
+        ref = lambda w: samples.loc[w.sample, "assembly_fasta"],
+    output:
+        ok = "qc/reference/{sample}/copy_check.pass",
+    log: "logs/reference_copy_check/{sample}.log"
+    params:
+        max_bad_mb = lambda w: (config.get("reference_copy_check", {}) or {}).get("max_bad_mb", 20),
+    threads: 24
+    resources:
+        mem_mb = 40000,
+        runtime = 120,
+    shell:
+        """
+        mkdir -p "$(dirname {log})"
+        python workflow/scripts/reference_copy_check.py {input.dual} {input.ref} qc/reference/{wildcards.sample} \
+            --threads {threads} --max_bad_mb {params.max_bad_mb} --label {wildcards.sample} > {log} 2>&1
+        """

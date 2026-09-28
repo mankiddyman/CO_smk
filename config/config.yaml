@@ -854,3 +854,27 @@ hap_align:
     preset: asm10
     align_mem_mb: 200000   # chr3 peaked at 119.8 GB; chr4 is ~1.7x its length
     align_runtime: 1440
+
+
+# The haploid reference every read is mapped to must hold every piece of the
+# genome exactly once (rule reference_copy_check). For most samples that is
+# the published hap1. With a heterozygous reciprocal translocation, Hi-C
+# phasing can put both homologs of one arm into hap1 and neither of the other:
+# list the chromosomes explicitly here and point the sample's assembly_fasta
+# (config/samples.csv) at results/reference/<sample>/genome.fa.
+mapping_reference:
+  Dparadoxa_std:
+    _approved: "2026-09-28 | hap1 held arm P twice and arm Q never; qc/translocations/Dparadoxa_hap1 (all-vs-all, arm_partners)"
+    from_sample: Dparadoxa_hap1
+    chromosomes: [chr1_hap1, chr2_hap2, chr3_hap1, chr4_hap1, chr5_hap1, chr6_hap1]
+    # chr1_hap1 = left arm + P, chr2_hap2 = left arm + Q: every arm once.
+    # Evidence: chr1_hap1-right <-> chr2_hap1-right collinear at identity 0.72,
+    # chr1_hap2-right <-> chr2_hap2-right at 0.76 (ordinary homologs 0.775);
+    # hap1's right arms vs hap2's share only scattered repeat hits. On hap1 the
+    # right arms had half the raw het SNP density at ALT ratio 0.29 (all
+    # filtered) and 0.8x depth: reads split between the two P copies.
+    # chr3/chr4 needs nothing: hap1 holds chr4_hap1 0-85.5 Mb (on chr3_hap2 in
+    # hap2) exactly once.
+
+reference_copy_check:
+  max_bad_mb: 20   # Mb of the genome allowed at 0 or 2+ copies before the gate fails
