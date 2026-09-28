@@ -368,7 +368,12 @@ def marker_sample_for(sample_id):
     ]
     if len(ref_rows) == 0:
         raise ValueError(f"No marker reference sample for species {species}")
-    return ref_rows.index[0]
+    # Markers are positions on ONE reference. Prefer the marker reference built
+    # on this sample's own assembly_fasta (2026-09-28: Dparadoxa_std, mapped to
+    # hap1 + chr2_hap2, was being genotyped at Dparadoxa_hap1's hap1 positions).
+    # Falls back to the species' first marker reference, the original behaviour.
+    same = ref_rows[ref_rows["assembly_fasta"] == samples.loc[sample_id, "assembly_fasta"]]
+    return same.index[0] if len(same) else ref_rows.index[0]
 
 
 def get_chromosomes(sample_id):
