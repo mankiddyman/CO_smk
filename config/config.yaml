@@ -879,3 +879,17 @@ mapping_reference:
 reference_copy_check:
   max_bad_mb: 20   # Mb allowed in runs (>= 5 Mb) of duplicated or absent sequence; divergent sequence
                    # with no counterpart anywhere ('unmatched') is reported and never counts
+
+
+# HiFi variant calling in pieces for chosen chromosomes (rules hifi_variants_region,
+# region_call_check, hifi_variants_concat_regions). bcftools mpileup uses one core,
+# so a long chromosome takes ~35 h whole (Dparadoxa_std chr4_hap1 was killed at 63%
+# by a 24 h limit, 2026-09-30). Pieces run the SAME command in parallel and are
+# stitched back in order. `check` (a stretch already called whole) is re-called in
+# pieces first; stitching waits until its records are identical. Chromosomes and
+# samples not listed keep hifi_variants_per_chrom.
+call_by_region:
+  Dparadoxa_std:
+    mb: 5
+    chromosomes: [chr4_hap1]
+    check: "chr5_hap1:1-2000000"

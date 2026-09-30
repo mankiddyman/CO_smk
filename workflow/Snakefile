@@ -1505,3 +1505,140 @@ rule reference_copy_check:
         python workflow/scripts/reference_copy_check.py {input.dual} {input.ref} qc/reference/{wildcards.sample} \
             --threads {threads} --max_bad_mb {params.max_bad_mb} --label {wildcards.sample} > {log} 2>&1
         """
+
+
+# ============================================================================
+# HiFi variant calling in pieces for chosen chromosomes (2026-09-30)
+# ============================================================================
+# bcftools mpileup uses one core, so a long chromosome takes ~35 h whole. For
+# (sample, chromosome) pairs in config call_by_region, the SAME mpileup | call
+# command runs on pieces in parallel and the pieces are stitched back in order
+# to by_chrom/{chrom}.vcf.gz. region_call_check first re-calls a stretch of a
+# chromosome already called whole, in pieces, and requires identical records;
+# stitching waits for its .pass. Everything not listed is untouched.
+CALL_REGIONS = {s: v for s, v in (config.get("call_by_region", {}) or {}).items() if not str(s).startswith("_")}
+_CR_SAMPLES = "|".join(CALL_REGIONS) or "NO_REGION_CALLING"
+_CR_CHROMS = "|".join(sorted({c for v in CALL_REGIONS.values() for c in v["chromosomes"]})) or "NO_REGION_CALLING"
+
+
+def _chrom_length(sample, chrom):
+    with open(samples.loc[sample, "assembly_fasta"] + ".fai") as fh:
+        return next(int(l.split("\t")[1]) for l in fh if l.split("\t")[0] == chrom)
+
+
+def call_regions(sample, chrom):
+    """Consecutive, non-overlapping 1-based pieces 'start-end' covering one listed chromosome."""
+    if chrom not in CALL_REGIONS[sample]["chromosomes"]:
+        raise ValueError("%s is not listed under call_by_region.%s.chromosomes" % (chrom, sample))
+    size, length = int(float(CALL_REGIONS[sample]["mb"]) * 1e6), _chrom_length(sample, chrom)
+    return ["%d-%d" % (s + 1, min(s + size, length)) for s in range(0, length, size)]
+
+
+def check_pieces(sample):
+    """The check stretch ('chrom:start-end', config check) cut into 1 Mb pieces."""
+    chrom, span = CALL_REGIONS[sample]["check"].split(":")
+    a, b = [int(x) for x in span.split("-")]
+    return chrom, ["%d-%d" % (s, min(s + 999999, b)) for s in range(a, b + 1, 1000000)]
+
+
+rule hifi_variants_region:
+    """hifi_variants_per_chrom's mpileup | call on ONE piece of a chromosome
+    (samples in config call_by_region). Piece VCFs are temporary."""
+    input:
+        fasta = lambda w: samples.loc[w.sample, "assembly_fasta"],
+        fai   = lambda w: samples.loc[w.sample, "assembly_fasta"] + ".fai",
+        bam   = "results/markers/{sample}/hifi.bam",
+        bai   = "results/markers/{sample}/hifi.bam.bai",
+    output:
+        vcf = temp("results/markers/{sample}/by_region/{chrom}/{region}.vcf.gz"),
+        tbi = temp("results/markers/{sample}/by_region/{chrom}/{region}.vcf.gz.tbi"),
+    log: "logs/hifi_variants_region/{sample}.{chrom}.{region}.log"
+    wildcard_constraints:
+        sample = _CR_SAMPLES,
+        region = r"\d+-\d+",
+    threads: 1
+    resources:
+        mem_mb = 4000,
+        runtime = 180,
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        mkdir -p $(dirname {output.vcf}) $(dirname {log})
+        bcftools mpileup -f {input.fasta} -q 20 -Q 20 -a AD,DP \
+            -r {wildcards.chrom}:{wildcards.region} {input.bam} 2> {log} | \
+        bcftools call -m -v -Oz -o {output.vcf} 2>> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+        """
+
+
+rule region_call_check:
+    """Proof on this sample's real data that calling in pieces reproduces calling
+    the whole chromosome: config `check` (a stretch of a chromosome already called
+    whole) is re-called in 1 Mb pieces; the records must be identical. Report:
+    qc/markers/{sample}/region_call_check.txt (kept on FAIL, as is the log)."""
+    input:
+        whole  = lambda w: "results/markers/%s/by_chrom/%s.vcf.gz" % (w.sample, check_pieces(w.sample)[0]),
+        wtbi   = lambda w: "results/markers/%s/by_chrom/%s.vcf.gz.tbi" % (w.sample, check_pieces(w.sample)[0]),
+        pieces = lambda w: ["results/markers/%s/by_region/%s/%s.vcf.gz" % (w.sample, check_pieces(w.sample)[0], r)
+                            for r in check_pieces(w.sample)[1]],
+        ptbi   = lambda w: ["results/markers/%s/by_region/%s/%s.vcf.gz.tbi" % (w.sample, check_pieces(w.sample)[0], r)
+                            for r in check_pieces(w.sample)[1]],
+    output:
+        ok = "qc/markers/{sample}/region_call_check.pass",
+    params:
+        region = lambda w: CALL_REGIONS[w.sample]["check"],
+        report = "qc/markers/{sample}/region_call_check.txt",
+    log: "logs/region_call_check/{sample}.log"
+    wildcard_constraints:
+        sample = _CR_SAMPLES,
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        mkdir -p $(dirname {output.ok}) $(dirname {log})
+        W={params.report}.whole.tmp; P={params.report}.pieces.tmp
+        bcftools view -H -r {params.region} {input.whole} > $W 2>> {log}
+        bcftools concat {input.pieces} 2>> {log} | bcftools view -H > $P 2>> {log}
+        if cmp -s $W $P; then verdict=PASS; else verdict=FAIL; fi
+        {{
+          echo "REGION CALL CHECK  {wildcards.sample}  {params.region}"
+          echo "  called as the whole chromosome: $(wc -l < $W) records"
+          echo "  called in 1 Mb pieces:          $(wc -l < $P) records"
+          if [ $verdict = PASS ]; then echo "  PASS: identical"; else echo "  FAIL: records differ (first lines of diff below)"; fi
+          if [ $verdict = FAIL ]; then diff $W $P | head -20 || true; fi
+        }} > {params.report}
+        rm -f $W $P
+        cat {params.report} >> {log}
+        if [ $verdict = PASS ]; then touch {output.ok}; else exit 1; fi
+        """
+
+
+rule hifi_variants_concat_regions:
+    """by_chrom/{chrom}.vcf.gz for chromosomes listed in config call_by_region:
+    their pieces stitched in order, only after region_call_check has passed."""
+    input:
+        check = "qc/markers/{sample}/region_call_check.pass",
+        vcfs  = lambda w: ["results/markers/%s/by_region/%s/%s.vcf.gz" % (w.sample, w.chrom, r)
+                           for r in call_regions(w.sample, w.chrom)],
+        tbis  = lambda w: ["results/markers/%s/by_region/%s/%s.vcf.gz.tbi" % (w.sample, w.chrom, r)
+                           for r in call_regions(w.sample, w.chrom)],
+    output:
+        vcf = "results/markers/{sample}/by_chrom/{chrom}.vcf.gz",
+        tbi = "results/markers/{sample}/by_chrom/{chrom}.vcf.gz.tbi",
+    log: "logs/hifi_variants_concat_regions/{sample}.{chrom}.log"
+    wildcard_constraints:
+        sample = _CR_SAMPLES,
+        chrom  = _CR_CHROMS,
+    threads: 2
+    resources:
+        mem_mb = 4000,
+        runtime = 60,
+    conda: "envs/markers.yaml"
+    shell:
+        """
+        mkdir -p $(dirname {log})
+        bcftools concat -Oz -o {output.vcf} {input.vcfs} 2> {log}
+        bcftools index -t {output.vcf} 2>> {log}
+        """
+
+
+ruleorder: hifi_variants_concat_regions > hifi_variants_per_chrom
