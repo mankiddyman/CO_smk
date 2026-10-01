@@ -35,7 +35,12 @@ A = ap.parse_args()
 S = A.sample
 os.makedirs(os.path.dirname(A.out) or ".", exist_ok=True)
 
-fai = "results/reference/%s/genome.fa.fai" % S
+import csv
+_rows = list(csv.DictReader(open("config/samples.csv")))
+_row = next((r for r in _rows if S in (r.get("sample_id"), r.get("sample"), list(r.values())[0])), None)
+if _row is None:
+    raise SystemExit("%s not found in config/samples.csv" % S)
+fai = _row["assembly_fasta"] + ".fai"
 chroms = [l.split("\t")[0] for l in open(fai)]
 lens = {l.split("\t")[0]: int(l.split("\t")[1]) for l in open(fai)}
 nb = {c: int(math.ceil(lens[c] / 1e6)) for c in chroms}

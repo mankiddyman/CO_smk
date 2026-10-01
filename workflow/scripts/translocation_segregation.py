@@ -51,7 +51,12 @@ def cnum(c):
 
 
 # --- translocated segments, from the homolog's chromosome number per window
-fai = "results/reference/%s/genome.fa.fai" % S
+import csv
+_rows = list(csv.DictReader(open("config/samples.csv")))
+_row = next((r for r in _rows if S in (r.get("sample_id"), r.get("sample"), list(r.values())[0])), None)
+if _row is None:
+    raise SystemExit("%s not found in config/samples.csv" % S)
+fai = _row["assembly_fasta"] + ".fai"
 ref = [l.split("\t")[0] for l in open(fai)]
 lens = {l.split("\t")[0]: int(l.split("\t")[1]) for l in open(fai)}
 rs = set(ref)
