@@ -875,6 +875,15 @@ mapping_reference:
     # filtered) and 0.8x depth: reads split between the two P copies.
     # chr3/chr4 needs nothing: hap1 holds chr4_hap1 0-85.5 Mb (on chr3_hap2 in
     # hap2) exactly once.
+  Dparadoxa_CB:
+    _approved: "2026-10-05 | every arm once, joined as the pollen inherit them: chr1_hap2 (L1+Q), chr2_hap1 (L2+P); qc/linkage/Dparadoxa_std/pollen_pairs_check.txt"
+    from_sample: Dparadoxa_hap1
+    chromosomes: [chr1_hap2, chr2_hap1, chr3_hap1, chr4_hap1, chr5_hap1, chr6_hap1]
+    # Every arm once, as in Dparadoxa_std, but joined the way the pollen inherit them:
+    # in Dparadoxa_std (chr1_hap1 L1+P, chr2_hap2 L2+Q) L1 and P assort independently
+    # (r 0.56) while L1 goes with Q (0.04) and L2 with P (0.00), which put a false
+    # crossover hotspot at both joins. Hi-C supports chr1_hap2 and chr2_hap1 as real
+    # molecules (reproducible_phd qc/hic_remap).
 
 reference_copy_check:
   max_bad_mb: 20   # Mb allowed in runs (>= 5 Mb) of duplicated or absent sequence; divergent sequence
@@ -892,4 +901,8 @@ call_by_region:
   Dparadoxa_std:
     mb: 5
     chromosomes: [chr4_hap1]
+    check: "chr5_hap1:1-2000000"
+  Dparadoxa_CB:
+    mb: 5
+    chromosomes: [chr1_hap2, chr2_hap1, chr4_hap1]
     check: "chr5_hap1:1-2000000"
