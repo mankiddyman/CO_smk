@@ -54,6 +54,9 @@ ARM = {"L1": "#5DCAA5", "L2": "#F0997B", "P": "#AFA9EC", "Q": "#FAC775"}
 # translocation joins on the paradoxa crossover references, as in paradoxa_cb_check.py
 JOINS = {"Dparadoxa_std": [("A join L1|P", "chr1_hap1", 262.9), ("D join L2|Q", "chr2_hap2", 215.0)],
          "Dparadoxa_CB": [("C join L1|Q", "chr1_hap2", 262.0), ("B join L2|P", "chr2_hap1", 211.0)]}
+ARMSPAN = {"chr1_hap1": (262.9, "L1", "P"), "chr2_hap2": (215.0, "L2", "Q"),   # A, D: the joins of JOINS
+           "chr1_hap2": (262.0, "L1", "Q"), "chr2_hap1": (211.0, "L2", "P")}   # C, B
+ARMNAME = {"chr1_hap1": "A", "chr1_hap2": "C", "chr2_hap1": "B", "chr2_hap2": "D"}
 PAIRS_FILE = "qc/linkage/Dparadoxa_std/pollen_pairs_check.txt"   # the conflict is measured on A + D
 WIN_MB, MIN_MOL, BINS, NBOOT = 10, 3, 20, 500
 USED, MISSING, NUM, PROBLEMS = [], [], {}, []
@@ -553,6 +556,15 @@ def rdna_depth(d):
     d["rdna_rows"], d["rdna_base"] = rows, b0
     d["rdna_45s_n"] = sum(r[2] == "45S" for r in rows)
     d["rdna_45s_complete"] = sum(r[7] for r in rows)
+    d["rdna_at_join"] = []
+    for j, jc, mb in JOINS.get(d["S"], []):
+        near = [r for r in rows if r[0] == jc and abs((r[10] + r[11]) / 2e6 - mb) <= 5]
+        if near:
+            r = max(near, key=lambda r: r[5])
+            d["rdna_at_join"].append("%s: %s array at %.1f Mb, %s× the reads of a typical window%s" % (
+                j, r[2], (r[10] + r[11]) / 2e6, fi(r[5]), ", a complete 45S unit" if r[7] else ""))
+        else:
+            d["rdna_at_join"].append("%s: no rDNA within 5 Mb" % j)
 
 
 for sp, d in D.items():
@@ -980,83 +992,106 @@ def fig_diagram():
     return save(fig, "fig_arm_diagram.png")
 
 
-def oe_log2(H, nper):
-    """log2 observed / expected: expected = mean at the same distance within a chromosome, block mean between."""
-    off = np.cumsum([0] + list(nper))
-    E = np.zeros_like(H)
-    for a in range(len(nper)):
-        for b in range(len(nper)):
-            blk = H[off[a]:off[a + 1], off[b]:off[b + 1]]
-            if a == b:
-                n = nper[a]
-                e = np.zeros_like(blk)
-                for k in range(n):
-                    i = np.arange(n - k)
-                    e[i, i + k] = e[i + k, i] = np.diagonal(blk, k).mean()
-                E[off[a]:off[a + 1], off[b]:off[b + 1]] = e
-            else:
-                E[off[a]:off[a + 1], off[b]:off[b + 1]] = blk.mean()
-    return np.log2((H + 1) / (E + 1))
-
-
-def hic_windows(M, chroms, bin_bp, lens, order):
-    """Sum a bin-level contact matrix into 10 Mb windows of the chromosomes in `order`."""
+def hic_agg(M, chroms, bin_bp, lens, order, agg_bp):
+    """Sum the bin-level contact matrix into agg_bp bins over the chromosomes in `order`."""
+    f = max(1, int(round(agg_bp / bin_bp)))
     nb = {c: -(-lens[c] // bin_bp) for c in chroms}
     off, o = {}, 0
     for c in chroms:
         off[c], o = o, o + nb[c]
     sel, grp, nper, k = [], [], [], 0
     for c in order:
-        nw = max(1, int(round(lens[c] / (WIN_MB * 1e6))))
-        nper.append(nw)
-        for i in range(nw):
-            b0 = min(int(i * WIN_MB * 1e6 // bin_bp), nb[c] - 1)
-            b1 = nb[c] if i == nw - 1 else max(min(int((i + 1) * WIN_MB * 1e6 // bin_bp), nb[c]), b0 + 1)
+        na = -(-nb[c] // f)
+        nper.append(na)
+        for i in range(na):
+            b0, b1 = i * f, min((i + 1) * f, nb[c])
             sel += list(range(off[c] + b0, off[c] + b1))
             grp += [k] * (b1 - b0)
             k += 1
     sel, grp = np.array(sel), np.array(grp)
     starts = np.r_[0, np.where(np.diff(grp) != 0)[0] + 1]
-    Ms = M[np.ix_(sel, sel)].astype(np.float64)
-    return np.add.reduceat(np.add.reduceat(Ms, starts, axis=0), starts, axis=1), nper
+    Ms = M[np.ix_(sel, sel)].astype(np.float32)
+    return np.add.reduceat(np.add.reduceat(Ms, starts, axis=0), starts, axis=1), nper, f * bin_bp
 
 
-def fig_hic_dual(sp):
-    """Hi-C on both haplotypes: homologous sequence on two chromosome copies shows as off-diagonal lines."""
+def draw_hic(ax, H, nper, order, agg_bp, short=True):
+    """Contacts on a log scale, white to red: white = the typical contact between two different chromosomes,
+    red = the diagonal. A chromosome is a red square; a misjoin would break a square or put red off the diagonal."""
+    lab = np.repeat(np.arange(len(nper)), nper)
+    inter = lab[:, None] != lab[None, :]
+    X = np.log10(H.astype(float) + 1)
+    lo = np.percentile(X[inter], 75) if inter.any() else np.percentile(X, 50)
+    hi = np.percentile(X[~inter], 99.5)
+    tot = sum(nper) * agg_bp / 1e6
+    im = ax.imshow(X, cmap="Reds", vmin=lo, vmax=max(hi, lo + 1e-6), interpolation="nearest",
+                   extent=(0, tot, tot, 0))
+    edges = np.cumsum([0] + list(nper)) * agg_bp / 1e6
+    for e in edges[1:-1]:
+        ax.axhline(e, color="#888780", lw=0.4)
+        ax.axvline(e, color="#888780", lw=0.4)
+    names = [(c.replace("_hap", " h") if short else c) for c in order]
+    ax.set_xticks((edges[:-1] + edges[1:]) / 2)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_yticks((edges[:-1] + edges[1:]) / 2)
+    ax.set_yticklabels(names, fontsize=6)
+    arm_strips(ax, order, edges, tot)
+    return im
+
+
+def arm_strips(ax, order, edges, tot, line="#2C2C2A"):
+    """Arm colours of the chr1/chr2 translocation along the top and left of a chromosome-by-chromosome map."""
+    band = tot * 0.018
+    for i, c in enumerate(order):
+        spans = [(0, ARMSPAN[c][0], ARMSPAN[c][1]), (ARMSPAN[c][0], edges[i + 1] - edges[i], ARMSPAN[c][2])] \
+            if c in ARMSPAN else [(0, edges[i + 1] - edges[i], None)]
+        for a, b, arm in spans:
+            col = ARM[arm] if arm else "#E9E7E0"
+            ax.add_patch(plt.Rectangle((edges[i] + a, -2.2 * band), b - a, band, color=col, clip_on=False, lw=0))
+            ax.add_patch(plt.Rectangle((-2.2 * band, edges[i] + a), band, b - a, color=col, clip_on=False, lw=0))
+            if arm and b - a > tot * 0.03:
+                ax.text(edges[i] + (a + b) / 2, -1.7 * band, arm, ha="center", va="center", fontsize=6)
+        if c in ARMSPAN:
+            x = edges[i] + ARMSPAN[c][0]
+            ax.plot([x, x], [0, tot], color=line, lw=0.6, ls=":")
+            ax.plot([0, tot], [x, x], color=line, lw=0.6, ls=":")
+    ax.set_xlim(-2.4 * band, tot)
+    ax.set_ylim(tot, -2.4 * band)
+    for k in ("top", "right"):
+        ax.spines[k].set_visible(False)
+
+
+def hic_load(sp, name):
     d = D[sp]
-    base = os.path.join(A.phd_root, "results", d["species"], "qc/hic_remap")
-    p = os.path.join(base, "contacts_all.npz")
-    if not os.path.exists(p):
-        p = os.path.join(base, "contacts_unique.npz")
+    p = os.path.join(A.phd_root, "results", d["species"], "qc/hic_remap", name)
     if not (have(p) and "L2n" in d):
         return None
     z = np.load(p)
-    M, chroms, bin_bp = z["M"], [str(x) for x in z["chroms"]], int(z["bin"])
+    return z["M"], [str(x) for x in z["chroms"]], int(z["bin"]), p
+
+
+def fig_hic_dual(sp):
+    """Hi-C on both haplotypes, all reads with MAPQ >= 1: reads that fit either copy of a sequence put contacts
+    between the copies, so homologous sequence shows as a red line off the diagonal."""
+    d = D[sp]
+    got = hic_load(sp, "contacts_all.npz") or hic_load(sp, "contacts_unique.npz")
+    if not got:
+        return None
+    M, chroms, bin_bp, p = got
     order = sorted([c for c in chroms if re.match(r"^chr\d+_hap[12]$", c)],
                    key=lambda c: (int(re.search(r"\d+", c).group()), c[-1]))
-    H, nper = hic_windows(M, chroms, bin_bp, d["L2n"], order)
+    focus = [c for c in ("chr1_hap1", "chr1_hap2", "chr2_hap1", "chr2_hap2") if c in chroms]
+    H1, n1, b1 = hic_agg(M, chroms, bin_bp, d["L2n"], order, 2e6)
+    H2, n2, b2 = hic_agg(M, chroms, bin_bp, d["L2n"], focus, 1e6)
     del M
-    R = oe_log2(H, nper)
-    fig, ax = plt.subplots(figsize=(9, 8))
-    im = ax.imshow(R, cmap="RdBu_r", vmin=-2, vmax=2, interpolation="nearest")
-    plt.colorbar(im, ax=ax, fraction=0.035, label="log2 observed / expected")
-    off = np.cumsum([0] + nper)
-    for b in off[1:-1]:
-        ax.axhline(b - 0.5, color="#444441", lw=0.4)
-        ax.axvline(b - 0.5, color="#444441", lw=0.4)
-    ax.set_xticks(off[:-1] + np.array(nper) / 2 - 0.5)
-    ax.set_xticklabels([c.replace("_hap", " h") for c in order], rotation=90, fontsize=6)
-    ax.set_yticks(off[:-1] + np.array(nper) / 2 - 0.5)
-    ax.set_yticklabels([c.replace("_hap", " h") for c in order], fontsize=6)
-    for S2 in JOINS.values():
-        for _, c, mb in S2:
-            if c in order:
-                x = off[order.index(c)] - 0.5 + mb / WIN_MB
-                ax.plot([x, x], [-0.5, off[-1] - 0.5], color="#2C2C2A", lw=0.5, ls=":")
-                ax.plot([-0.5, off[-1] - 0.5], [x, x], color="#2C2C2A", lw=0.5, ls=":")
-    ax.set_title("%s Hi-C on both haplotypes (%s; %g Mb windows; dotted = chr1/chr2 joins)"
-                 % (NAME[sp], os.path.basename(p).replace(".npz", ""), WIN_MB), loc="left", fontsize=9)
-    fig.tight_layout()
+    fig, axs = plt.subplots(1, 2, figsize=(15, 7.6), gridspec_kw={"width_ratios": [1.05, 1]})
+    im = draw_hic(axs[0], H1, n1, order, b1)
+    axs[0].set_title("all twelve chromosomes, hap1 next to hap2 (2 Mb bins)", loc="left", fontsize=9, pad=16)
+    draw_hic(axs[1], H2, n2, focus, b2, short=False)
+    axs[1].set_title("chr1 and chr2 only (1 Mb bins): A, C, B, D", loc="left", fontsize=9, pad=16)
+    cb = fig.colorbar(im, ax=axs, fraction=0.02, pad=0.01)
+    cb.set_label("log10 contacts (white = typical between two chromosomes)", fontsize=7)
+    fig.suptitle("%s Hi-C on both haplotypes (%s). Arm colours as in the diagram; dotted = joins" % (
+        NAME[sp], os.path.basename(p).replace(".npz", "")), x=0.01, ha="left", fontsize=9)
     return save(fig, "fig_hic_both_haplotypes_%s.png" % sp)
 
 
@@ -1071,74 +1106,40 @@ def fig_link_hic(sp):
     idx = [i for c in d["main"] for i in win.index[win.chrom == c]]
     Rm = R[np.ix_(idx, idx)]
     wsub = win.loc[idx].reset_index(drop=True)
-    hic = os.path.join(A.phd_root, "results", d["species"], "qc/hic_remap/contacts_unique.npz")
+    got = hic_load(sp, "contacts_unique.npz")
     H = None
-    if have(hic) and "L2n" in d:
-        z = np.load(hic)
-        M, chroms, bin_bp = z["M"], [str(x) for x in z["chroms"]], int(z["bin"])
-        nb = {c: -(-d["L2n"][c] // bin_bp) for c in chroms if c in d["L2n"]}
-        same = all(d["L2n"].get(c) == d["L"][c] for c in d["main"])
-        if not same:
-            PROBLEMS.append(("Hi-C map %s" % sp, "chromosome lengths differ between the reference and the 2n assembly"))
-        elif len(nb) == len(chroms) and sum(nb.values()) == M.shape[0]:
-            off, o = {}, 0
-            for c in chroms:
-                off[c], o = o, o + nb[c]
-            sel, grp = [], []
-            for k, r in wsub.iterrows():
-                c, i = r.chrom, int(r.window)
-                last = i == wsub[wsub.chrom == c].window.max()
-                b0 = min(int(i * WIN_MB * 1e6 // bin_bp), nb[c] - 1)
-                b1 = nb[c] if last else max(min(int((i + 1) * WIN_MB * 1e6 // bin_bp), nb[c]), b0 + 1)
-                sel += list(range(off[c] + b0, off[c] + b1))
-                grp += [k] * (b1 - b0)
-            sel, grp = np.array(sel), np.array(grp)
-            starts = np.r_[0, np.where(np.diff(grp) != 0)[0] + 1]
-            Ms = M[np.ix_(sel, sel)].astype(np.float64)
-            H = np.add.reduceat(np.add.reduceat(Ms, starts, axis=0), starts, axis=1)
-            if H.shape != (len(wsub), len(wsub)):
-                PROBLEMS.append(("Hi-C map %s" % sp, "window aggregation gave %s, expected %d" % (H.shape, len(wsub))))
-                H = None
+    if got:
+        M, chroms, bin_bp, p = got
+        if all(d["L2n"].get(c) == d["L"][c] for c in d["main"]) and all(c in chroms for c in d["main"]):
+            H, nper, aggb = hic_agg(M, chroms, bin_bp, d["L2n"], d["main"], 2e6)
         else:
-            PROBLEMS.append(("Hi-C map %s" % sp, "contact matrix does not match the 2n assembly index"))
+            PROBLEMS.append(("Hi-C map %s" % sp, "reference chromosomes not in the 2n assembly with the same lengths"))
+        del M
     ncol = 2 if H is not None else 1
-    fig, axs = plt.subplots(1, ncol, figsize=(6.2 * ncol, 6))
+    fig, axs = plt.subplots(1, ncol, figsize=(6.6 * ncol, 6.6))
     axs = np.atleast_1d(axs)
-    bounds, labels, pos = [], [], 0
-    for c in d["main"]:
-        n = int((wsub.chrom == c).sum())
-        labels.append((pos + n / 2, re.sub(r"_hap\d", "", c) + ("" if sp == "binata" else c[-5:].replace("_", " "))))
-        pos += n
-        bounds.append(pos)
+    nwin = [int((wsub.chrom == c).sum()) for c in d["main"]]
+    tot = sum(nwin) * WIN_MB
     im = axs[0].imshow(np.clip(1 - 2 * Rm, 0, 1), cmap="Greens" if sp == "binata" else "Purples", vmin=0, vmax=1,
-                       interpolation="nearest")
-    axs[0].set_title("pollen linkage (1 − 2r; dark = inherited together)", loc="left", fontsize=9)
-    plt.colorbar(im, ax=axs[0], fraction=0.035)
+                       interpolation="nearest", extent=(0, tot, tot, 0))
+    edges = np.cumsum([0] + nwin) * WIN_MB
+    for e in edges[1:-1]:
+        axs[0].axhline(e, color="#888780", lw=0.4)
+        axs[0].axvline(e, color="#888780", lw=0.4)
+    axs[0].set_xticks((edges[:-1] + edges[1:]) / 2)
+    axs[0].set_xticklabels(d["main"], rotation=90, fontsize=6)
+    axs[0].set_yticks((edges[:-1] + edges[1:]) / 2)
+    axs[0].set_yticklabels(d["main"], fontsize=6)
+    arm_strips(axs[0], d["main"], edges, tot)
+    axs[0].set_title("pollen linkage, %g Mb windows (1 − 2r; dark = inherited together)" % WIN_MB, loc="left",
+                     fontsize=9, pad=16)
     if H is not None:
-        Hn = oe_log2(H, [int((wsub.chrom == c).sum()) for c in d["main"]])
-        im = axs[1].imshow(Hn, cmap="RdBu_r", vmin=-2, vmax=2, interpolation="nearest")
-        axs[1].set_title("Hi-C, MAPQ ≥ 30: log2 observed / expected (red = more contact than expected)",
-                         loc="left", fontsize=9)
-        plt.colorbar(im, ax=axs[1], fraction=0.035)
-    for ax in axs:
-        for b in bounds[:-1]:
-            ax.axhline(b - 0.5, color="#444441", lw=0.4)
-            ax.axvline(b - 0.5, color="#444441", lw=0.4)
-        ax.set_xticks([p - 0.5 for p, _ in labels])
-        ax.set_xticklabels([t for _, t in labels], rotation=90, fontsize=6)
-        ax.set_yticks([p - 0.5 for p, _ in labels])
-        ax.set_yticklabels([t for _, t in labels], fontsize=6)
-        if S in JOINS:
-            for _, c, mb in JOINS[S]:
-                k = wsub.index[(wsub.chrom == c) & (wsub.window == int(mb // WIN_MB))]
-                if len(k):
-                    x = k[0] - 0.5 + (mb % WIN_MB) / WIN_MB
-                    ax.plot([x, x], [-0.5, len(wsub) - 0.5], color="#D85A30", lw=0.6, ls=":")
-                    ax.plot([-0.5, len(wsub) - 0.5], [x, x], color="#D85A30", lw=0.6, ls=":")
-    fig.suptitle("%s (%s): every chromosome, %g Mb windows%s" % (
-        NAME[sp], S, WIN_MB, "; orange dotted lines = translocation joins" if S in JOINS else ""),
-        x=0.01, ha="left", fontsize=9)
-    fig.tight_layout()
+        draw_hic(axs[1], H, nper, d["main"], aggb, short=False)
+        axs[1].set_title("Hi-C on this reference, MAPQ ≥ 30 (2 Mb bins; log, white = between chromosomes)",
+                         loc="left", fontsize=9, pad=16)
+    fig.suptitle("%s (%s): every chromosome%s" % (NAME[sp], S, "; arm colours as in the diagram, dotted = chr1/chr2 "
+                 "joins" if S in JOINS else ""), x=0.01, ha="left", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
     return save(fig, "fig_linkage_hic_%s.png" % sp)
 
 
@@ -1222,52 +1223,68 @@ def fig_structure(sp):
     if "struct" not in d:
         return None
     n = len(d["main"])
-    fig = plt.figure(figsize=(11, 1.55 * n + 0.6))
-    gs = fig.add_gridspec(2 * n, 1, height_ratios=[4, 1] * n, hspace=0.25)
+    fig = plt.figure(figsize=(11, 1.9 * n + 1.0))
+    gs = fig.add_gridspec(3 * n, 1, height_ratios=[3.0, 0.3, 0.42] * n, hspace=0.16)
     big = max(d["L"].values()) / 1e6
-    colk = {"collinear": "#D3D1C7", "INVERTED": "#E24B4A", "TRANSLOCATED": "#EF9F27"}
+    colk = {"collinear": "#D3D1C7", "INVERTED": "#A32D2D", "TRANSLOCATED": "#185FA5"}
     co = d["co"]
     for i, c in enumerate(d["main"]):
-        ax, ax2 = fig.add_subplot(gs[2 * i]), fig.add_subplot(gs[2 * i + 1])
+        ax, axa, axs_ = fig.add_subplot(gs[3 * i]), fig.add_subplot(gs[3 * i + 1]), fig.add_subplot(gs[3 * i + 2])
+        L = d["L"][c] / 1e6
         nb = int(math.ceil(d["L"][c] / 5e6))
         cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // 5e6).astype(int), nb - 1), minlength=nb)
-        ax.bar((np.arange(nb) + 0.5) * 5, 100.0 * cnt / d["ncell_co"] / 5, width=5, color=COL[sp], alpha=0.85)
+        y = 100.0 * cnt / d["ncell_co"] / 5
+        ax.bar((np.arange(nb) + 0.5) * 5, y, width=5, color=COL[sp], alpha=0.85)
         pos = d["good"].pos[d["good"].chrom == c].values
         mk = np.bincount(np.minimum((pos // 5e6).astype(int), nb - 1), minlength=nb)
         a3 = ax.twinx()
         a3.plot((np.arange(nb) + 0.5) * 5, mk / 5, color="#888780", lw=0.8)
         a3.set_yticks([])
         a3.spines["right"].set_visible(False)
+        top = max(float(y.max()), 0.1) * 1.18
+        ax.set_ylim(0, top)
         for r in d.get("dead", []):
             if r[0] == c:
                 a, b = [float(x) for x in r[1].split("–")]
-                ax.axvspan(a, b, color="#85B7EB", alpha=0.25, lw=0)
-        for _, jc, mb in JOINS.get(d["S"], []):
-            if jc == c:
-                for a_ in (ax, ax2):
-                    a_.axvline(mb, color="#2C2C2A", lw=0.9, ls=":")
+                ax.plot([a, b], [top * 0.94] * 2, color="#2C2C2A", lw=3, solid_capstyle="butt")
+        if c in ARMSPAN:
+            for a_ in (ax, axa, axs_):
+                a_.axvline(ARMSPAN[c][0], color="#2C2C2A", lw=0.9, ls=":")
         ax.set_xlim(0, big)
-        ax.set_ylabel(c, fontsize=7)
+        ax.set_ylabel("cM/Mb", fontsize=6)
         ax.tick_params(labelsize=6, labelbottom=False)
+        ax.set_title("%s%s" % (c, " = %s (%s·%s)" % (ARMNAME[c], ARMSPAN[c][1], ARMSPAN[c][2]) if c in ARMSPAN else ""),
+                     loc="left", fontsize=8, pad=2)
+        spans = [(0, ARMSPAN[c][0], ARMSPAN[c][1]), (ARMSPAN[c][0], L, ARMSPAN[c][2])] if c in ARMSPAN else [(0, L, None)]
+        for a, b, arm in spans:
+            axa.add_patch(plt.Rectangle((a, 0), b - a, 1, color=ARM[arm] if arm else "#F1EFE8", lw=0))
+            if arm:
+                axa.text((a + b) / 2, 0.5, arm, ha="center", va="center", fontsize=7, fontweight="bold")
         st = d["struct"][c]
-        ax2.add_patch(plt.Rectangle((0, 0), d["L"][c] / 1e6, 1, color="white", ec="#B4B2A9", lw=0.5))
+        axs_.add_patch(plt.Rectangle((0, 0), L, 1, color="white", ec="#B4B2A9", lw=0.5))
         for k in KINDS:
             for a, b in st[k]:
-                ax2.add_patch(plt.Rectangle((a / 1e6, 0), (b - a) / 1e6, 1, color=colk[k], lw=0))
-        ax2.set_xlim(0, big)
-        ax2.set_ylim(0, 1)
-        ax2.set_yticks([])
-        ax2.tick_params(labelsize=6, labelbottom=(i == n - 1))
-        for k in ("top", "right", "left"):
-            ax2.spines[k].set_visible(False)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=colk[k]) for k in KINDS] + [
-        plt.Rectangle((0, 0), 1, 1, fc="white", ec="#B4B2A9"), plt.Rectangle((0, 0), 1, 1, color="#85B7EB", alpha=0.4)]
-    fig.legend(handles, ["other haplotype collinear", "inverted", "from another chromosome (translocated)",
-                         "no alignment to the other haplotype", "no crossover over >= %d Mb" % d.get("dead_thr", 20)],
-               loc="upper center", ncol=5, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.995))
-    fig.text(0.5, 0.01, "Mb; bars = cM/Mb, grey line = good markers (own scale); dotted = chr1/chr2 joins",
-             ha="center", fontsize=7)
-    fig.subplots_adjust(top=0.965, bottom=0.045, left=0.07, right=0.98)
+                axs_.add_patch(plt.Rectangle((a / 1e6, 0), (b - a) / 1e6, 1, color=colk[k], lw=0))
+        for a_ in (axa, axs_):
+            a_.set_xlim(0, big)
+            a_.set_ylim(0, 1)
+            a_.set_yticks([])
+            for k in ("top", "right", "left"):
+                a_.spines[k].set_visible(False)
+        axa.tick_params(labelbottom=False, bottom=False)
+        axa.spines["bottom"].set_visible(False)
+        axs_.tick_params(labelsize=6, labelbottom=(i == n - 1))
+    handles = [plt.Rectangle((0, 0), 1, 1, color=ARM[a]) for a in ("L1", "L2", "P", "Q")] + \
+        [plt.Rectangle((0, 0), 1, 1, color=colk[k]) for k in KINDS] + \
+        [plt.Rectangle((0, 0), 1, 1, fc="white", ec="#B4B2A9"), plt.Line2D([0], [0], color="#2C2C2A", lw=3)]
+    fig.legend(handles, ["arm L1", "arm L2", "arm P", "arm Q", "homolog collinear", "homolog inverted",
+                         "homolog from another chromosome", "no homolog alignment",
+                         "no crossover over >= %d Mb" % d.get("dead_thr", 20)],
+               loc="lower center", ncol=5, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.0))
+    fig.text(0.5, 0.035, "Mb. Per chromosome: crossovers (bars, cM/Mb; grey line = good markers), the arms of the "
+             "chr1/chr2 translocation, and where the other haplotype's copy aligns (hap2 on hap1)", ha="center",
+             fontsize=7)
+    fig.subplots_adjust(top=0.985, bottom=0.085, left=0.07, right=0.98)
     return save(fig, "fig_structure_landscape_%s.png" % sp)
 
 
@@ -1698,8 +1715,8 @@ if FIGS.get("structure"):
     H.append(img(FIGS.get("structure")))
     H.append(P("Under each chromosome: where the other haplotype's copy aligns to it (hap2 on hap1, synteny blocks from "
                "translocation_map.py), collinear, inverted or from a differently numbered chromosome, and where nothing "
-               "aligns. Blue shading: stretches without a crossover in any of the %s nuclei, long enough to be unlikely by "
-               "chance (table below). On chr1_hap1 and "
+               "aligns. Black bars: stretches without a crossover in any of the %s nuclei, long enough to be unlikely by "
+               "chance (table below). Arm colours as in the chr1/chr2 diagram. On chr1_hap1 and "
                "chr2_hap2 the arms beyond the joins (P and Q) have no partner in the other haplotype by construction: "
                "their partners are the other chr1/chr2 homolog (section 7)." % fi(Pd.get("ncell_co"))))
 if Pd.get("dead") is not None:
@@ -1715,13 +1732,14 @@ if Pd.get("dead") is not None:
 
 # ---- 7
 H.append("<h2>7. Is each reference right?</h2>")
-H.append(P("Pollen linkage: for every pair of %g Mb windows, r = share of nuclei whose genotypes disagree (0 = always "
-           "inherited together, 0.5 = independent), shown as 1 − 2r. In a correct reference every chromosome is one "
-           "dark block on the diagonal and everything off it is pale. Next to it, Hi-C on the same windows as observed "
-           "over expected contacts: the molecules in the plant's tissue. Hi-C reads come from one chromosome copy at a "
-           "time, so on a one-haplotype reference it shows each chromosome as assembled (no misjoins) but cannot show "
-           "a translocation between the two copies; pollen linkage can, as off-diagonal blocks. The map on both "
-           "haplotypes below shows where the copies' sequences relate." % WIN_MB))
+H.append(P("Left, pollen linkage: for every pair of %g Mb windows, r = share of nuclei whose genotypes disagree (0 = "
+           "always inherited together, 0.5 = independent), shown as 1 − 2r; in a correct reference each chromosome is "
+           "one dark block on the diagonal and everything off it is pale. Right, Hi-C on the same chromosomes, raw "
+           "contacts on a log scale from white (the typical contact between two different chromosomes) to red: each "
+           "chromosome of the plant's tissue is one red square. A misassembly would break a square or put a red block "
+           "off the diagonal. Hi-C reads come from one chromosome copy at a time, so a translocation between the two "
+           "copies cannot show here; it shows in the pollen (off-diagonal blocks on the left) and in the map on both "
+           "haplotypes below." % WIN_MB))
 for sp in D:
     H.append("<h3>%s</h3>" % NAME[sp])
     H.append(img(FIGS.get("linkhic_" + sp)))
@@ -1729,10 +1747,11 @@ for sp in D:
 if FIGS.get("hic_dual"):
     H.append("<h3><i>D. paradoxa</i>: Hi-C on both haplotypes</h3>")
     H.append(img(FIGS.get("hic_dual"), 80))
-    H.append(P("All twelve chromosomes, hap1 and hap2 of each number side by side, as observed over expected contacts. "
-               "Reads that could sit on either copy of a sequence link the two copies, so off-diagonal lines between "
-               "a hap1 and a hap2 chromosome mark homologous sequence: for a collinear pair a line along the diagonal "
-               "of their block, for the chr1/chr2 arms a line that changes partner at the dotted join."))
+    H.append(P("Reads that fit either copy of a sequence put contacts between the two copies, so homologous "
+               "sequence on two chromosomes shows as a red line off the diagonal: for an ordinary pair (chr3 h1 and "
+               "chr3 h2, say) one line through their block. Right, chromosomes 1 and 2 with their arms coloured as in "
+               "the diagram below: if the tissue chromosomes are as assembled, L1 links A with C, L2 links B with D, "
+               "P links A with B and Q links C with D, so each line changes partner at a dotted join."))
 H.append("<h3><i>D. paradoxa</i>: chromosomes 1 and 2 in the tissue and in the pollen</h3>")
 H.append(img(FIGS.get("diagram")))
 H.append(P("Names: L1 and L2 are the left arms of chr1 and chr2, P and Q the right arms; each arm exists twice. "
@@ -1771,6 +1790,9 @@ H.append(P("barrnap finds rRNA gene fragments in many places, but an assembled c
            "against a typical 20 kb window estimate how many copies collapsed into it. Trusted here: a complete 45S "
            "unit (18S and 28S together), at least 5× the reads of a typical window, or at least 50 assembled 5S genes."))
 H.append(img(FIGS.get("rdna")))
+if Pd.get("rdna_at_join"):
+    H.append(P("At the joins: %s. A collapsed array shows as many times the typical depth; a complete unit at about "
+               "1× is a single copy, not an array." % "; ".join(Pd["rdna_at_join"])))
 for sp, d in D.items():
     if d.get("rdna_rows"):
         keep = [r for r in d["rdna_rows"] if r[9] or r[6]]
