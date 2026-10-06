@@ -539,17 +539,127 @@ def rdna_depth(d):
         n, span = count(a["chrom"], a["start"], a["end"])
         typ = "45S" if any(x in ("18S", "28S", "5_8S", "5.8S") for x in a["genes"]) else "5S"
         fold = n / (b0 * span / 20000.0)
-        near = [j for j, jc, mb in JOINS.get(d["S"], []) if jc == a["chrom"] and abs(a["start"] / 1e6 - mb) <= 2]
+        near = ["%s (%.1f Mb away)" % (j, abs((a["start"] + a["end"]) / 2e6 - mb)) for j, jc, mb in JOINS.get(d["S"], [])
+                if jc == a["chrom"] and abs((a["start"] + a["end"]) / 2e6 - mb) <= 5]
         gs = pd.Series(a["genes"]).value_counts()
+        complete = "18S" in a["genes"] and "28S" in a["genes"]
+        n5s = int(gs.get("5S", 0))
+        trust = complete or fold >= 5 or n5s >= 50
         rows.append([a["chrom"], "%.2f" % (a["start"] / 1e6), typ, ", ".join("%s x%d" % (k, v) for k, v in gs.items()),
-                     n, fold, ", ".join(near)])
+                     n, fold, "; ".join(near), complete, n5s, trust, a["start"], a["end"]])
     rows.sort(key=lambda r: -r[5])
+    d["rdna_n_arrays"] = len(rows)
+    d["rdna_n_trust"] = sum(r[9] for r in rows)
     d["rdna_rows"], d["rdna_base"] = rows, b0
     d["rdna_45s_n"] = sum(r[2] == "45S" for r in rows)
+    d["rdna_45s_complete"] = sum(r[7] for r in rows)
 
 
 for sp, d in D.items():
     guarded("rDNA read depth %s" % sp, lambda d=d: rdna_depth(d))
+
+# ===================================================== structure between the haplotypes
+KINDS = ["collinear", "INVERTED", "TRANSLOCATED"]
+
+
+def merge(iv):
+    out = []
+    for a, b in sorted(iv):
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def covered(iv, a, b):
+    return sum(max(0, min(e, b) - max(s0, a)) for s0, e in iv)
+
+
+def structure(d):
+    """hap2-on-hap1 synteny blocks (translocation_map.py) in this reference's coordinates: for each chromosome,
+    where its other-haplotype copy aligns collinear, inverted, from another chromosome, or not at all."""
+    sid = next((k for k, r in SAMPLES.items() if r["species"] == d["species"] and r["haplotype"] == "hap1"), None)
+    p = "qc/translocations/%s/%s_synteny_blocks.tsv" % (sid, sid)
+    if not have(p):
+        return
+    bt = pd.read_csv(p, sep="\t")
+    bt["kind"] = bt["kind"].fillna("").replace("", "collinear")
+    st = {}
+    for c in d["main"]:
+        x = bt[bt.hap1 == c] if c.endswith("_hap1") else bt[bt.hap2 == c]
+        s0, e0 = (x.t_start, x.t_end) if c.endswith("_hap1") else (x.q_start, x.q_end)
+        st[c] = {k: merge([(int(a), int(b)) for a, b, kk in zip(s0, e0, x["kind"]) if kk == k]) for k in KINDS}
+        st[c]["any"] = merge([(int(a), int(b)) for a, b in zip(s0, e0)])
+    d["struct"], d["struct_src"] = st, p
+    for k in KINDS:
+        put("paradoxa" if d is Pd else "binata", "struct_mb." + k,
+            sum(covered(st[c][k], 0, d["L"][c]) for c in d["main"]) / 1e6)
+
+
+def dead_spots(d, w=5e6):
+    """Runs of 5 Mb windows without a crossover (join artefact excluded) and what they overlap. Only runs long
+    enough that fewer than one is expected by chance (same crossovers per chromosome, placed uniformly) are kept."""
+    co = d["co"][~d["co"].near_join]
+    gm = d.get("good")
+
+    def runs(cnt, L):
+        out, i = [], 0
+        while i < len(cnt):
+            if cnt[i] == 0:
+                j = i
+                while j + 1 < len(cnt) and cnt[j + 1] == 0:
+                    j += 1
+                out.append((i * w, min((j + 1) * w, L)))
+                i = j + 1
+            else:
+                i += 1
+        return out
+    sim = []
+    for _ in range(200):
+        lens = []
+        for c in d["main"]:
+            L = d["L"][c]
+            nb = int(math.ceil(L / w))
+            pos = rng.uniform(0, L, int((co.chrom == c).sum()))
+            lens += [b - a for a, b in runs(np.bincount(np.minimum((pos // w).astype(int), nb - 1), minlength=nb), L)]
+        sim.append(np.array(lens))
+    thr = next((t for t in range(20, 205, 5) if np.mean([(x >= t * 1e6).sum() for x in sim]) < 1.0), 200)
+    chance = np.array([(x >= thr * 1e6).sum() for x in sim])
+    rows = []
+    for c in d["main"]:
+        L = d["L"][c]
+        nb = int(math.ceil(L / w))
+        cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // w).astype(int), nb - 1), minlength=nb)
+        mk = np.bincount(np.minimum((gm.pos[gm.chrom == c] // w).astype(int), nb - 1), minlength=nb) if gm is not None \
+            else np.zeros(nb)
+        med = max(float(np.median(mk)), 1.0)
+        for a, b in runs(cnt, L):
+            ln = b - a
+            if ln < thr * 1e6:
+                continue
+            st = d.get("struct", {}).get(c)
+            sh = {k: covered(st[k], a, b) / ln for k in KINDS} if st else {}
+            none = 1 - covered(st["any"], a, b) / ln if st else float("nan")
+            m = mk[int(a // w):int(math.ceil(b / w))].mean() / med
+            join = any(jc == c and a <= mb * 1e6 <= b for _, jc, mb in JOINS.get(d["S"], []))
+            cause = ("inverted in the other haplotype" if sh.get("INVERTED", 0) >= 0.5 else
+                     "no homolog in the other haplotype" if ok(none) and none >= 0.5 else
+                     "translocated segment" if sh.get("TRANSLOCATED", 0) >= 0.5 else
+                     "few markers" if m < 0.25 else "not explained by structure or markers")
+            rows.append([c, "%.0f–%.0f" % (a / 1e6, b / 1e6), ff(ln / 1e6, 0),
+                         ff(100 * sh.get("INVERTED", float("nan")), 0), ff(100 * sh.get("TRANSLOCATED", float("nan")), 0),
+                         ff(100 * none, 0), ff(m, 2), "yes" if join else "", cause])
+    d["dead"], d["dead_thr"] = rows, thr
+    d["dead_chance"] = (float(chance.mean()), np.percentile(chance, 2.5), np.percentile(chance, 97.5))
+    d["dead_mb"] = sum(float(r[2]) for r in rows)
+
+
+for sp, d in D.items():
+    if sp == "paradoxa":
+        guarded("structure %s" % sp, lambda d=d: structure(d))
+    if "co" in d:
+        guarded("dead spots %s" % sp, lambda d=d: dead_spots(d))
 
 # =================================================================== numbers out
 for sp, d in D.items():
@@ -559,7 +669,7 @@ for sp, d in D.items():
               "raw_share_pass", "pair_sim_median", "dup_pairs", "dup_cells", "distinct_genotypes", "called_share",
               "ncell_co", "co_total", "co_mean", "co_sd", "co_median", "co_mean_nj", "below_obligate",
               "width_median_kb", "U_markers", "U_genes", "join_cos", "rho_markers", "window_mean", "shape", "shape_nj",
-              "asm2n", "rdna_base", "rdna_45s_n"):
+              "asm2n", "rdna_base", "rdna_45s_n", "rdna_45s_complete", "rdna_n_arrays", "rdna_n_trust", "dead_mb"):
         if k in d:
             put(sp, k, d[k])
     for lab in ("land", "land_nj"):
@@ -589,9 +699,16 @@ for sp, d in D.items():
         d["genes_med"] = put(sp, "selected_genes_median", b.n_genes.median())
     for c, v in d.get("per_chrom", {}).items():
         put(sp, "cos_per_grain." + c, v)
+    if "dead" in d:
+        put(sp, "dead_spots", len(d["dead"]))
+        put(sp, "dead_spots_chance", "%.1f (95%% %.0f–%.0f)" % d["dead_chance"])
+        put(sp, "dead_spots_min_mb", d["dead_thr"])
+        for r in d["dead"]:
+            put(sp, "dead.%s:%s" % (r[0], r[1]), "%s Mb, inv %s%%, transl %s%%, no homolog %s%%, markers %s, %s"
+                % (r[2], r[3], r[4], r[5], r[6], r[8]))
     for r in d.get("busiest", []):
         put(sp, "busiest_5mb.%s:%s" % (r[0], r[1]), "%d crossovers, p %s%s" % (r[2], r[4], ", near join" if r[5] else ""))
-    for r in d.get("rdna_rows", [])[:8]:
+    for r in [r for r in d.get("rdna_rows", []) if r[9] or r[6]][:12]:
         put(sp, "rdna_fold.%s:%s" % (r[0], r[1]), "%s %s reads %d fold %.0f %s" % (r[2], r[3], r[4], r[5], r[6]))
 
 # ======================================================================== figures
@@ -761,22 +878,50 @@ def fig_per_chrom():
     return save(fig, "fig_crossovers_per_chromosome.png")
 
 
-def fig_coc():
-    fig, axs = plt.subplots(1, 2, figsize=(10, 3.4), sharey=True)
+def interference(d):
+    """Adjacent crossovers on one chromosome of one nucleus: their distance as a share of the chromosome,
+    against the same numbers of crossovers placed independently (no interference)."""
+    co = d["co"][~d["co"].near_join]
+    obs, groups = [], []
+    for (bc, c), x in co.groupby(["barcode", "chrom"]):
+        if len(x) >= 2:
+            obs += list(np.diff(np.sort(x.u.values)))
+            groups.append((c, len(x)))
+    pool = {c: co.u[co.chrom == c].values for c in d["main"]}
+    edges = np.linspace(0, 1, 11)
+    o = np.histogram(obs, bins=edges)[0].astype(float)
+    nulls = []
+    for _ in range(300):
+        dd = []
+        for c, k in groups:
+            dd += list(np.diff(np.sort(rng.choice(pool[c], k, replace=True))))
+        nulls.append(np.histogram(dd, bins=edges)[0])
+    nulls = np.array(nulls, float)
+    se = nulls[:, :2].sum(1)
+    d["intf"] = dict(edges=edges, obs=o, exp=nulls.mean(0), lo=np.percentile(nulls, 2.5, 0),
+                     hi=np.percentile(nulls, 97.5, 0), pairs=len(obs), short_obs=o[:2].sum(),
+                     short_exp=se.mean(), ratio=o[:2].sum() / max(se.mean(), 1e-9),
+                     ratio_lo=o[:2].sum() / max(np.percentile(se, 97.5), 1e-9),
+                     ratio_hi=o[:2].sum() / max(np.percentile(se, 2.5), 1e-9))
+
+
+def fig_interference():
+    fig, axs = plt.subplots(1, 2, figsize=(10, 3.4))
     for ax, (sp, d) in zip(axs, D.items()):
-        if "coc" not in d:
-            ax.text(0.5, 0.5, "coc_table.tsv missing", ha="center", transform=ax.transAxes)
+        f = d.get("intf")
+        if not f:
             continue
-        c = d["coc"].dropna(subset=["coc"])
-        ax.fill_between(c.d_bin, c.ci_lo, c.ci_hi, color=COL[sp], alpha=0.18, lw=0)
-        ax.plot(c.d_bin, c.coc, color=COL[sp], lw=1.8, marker="o", ms=3)
-        ax.axhline(1, color="#444441", ls="--", lw=1)
-        ax.set_ylim(0, min(2.5, max(1.6, float(np.nanmax(c.ci_hi)) * 1.05)))
-        ax.set_xlabel("distance between the two intervals, Mb")
-        ax.set_title("%s" % NAME[sp], loc="left")
-    axs[0].set_ylabel("coefficient of coincidence\n(< 1 = interference)")
+        x = (f["edges"][:-1] + f["edges"][1:]) / 2 * 100
+        ax.bar(x, f["obs"], width=9, color=COL[sp], alpha=0.8, label="observed")
+        ax.fill_between(x, f["lo"], f["hi"], color="#888780", alpha=0.25, lw=0)
+        ax.plot(x, f["exp"], color="#444441", lw=1.5, marker="o", ms=3, label="expected without interference")
+        ax.set_xlabel("distance between adjacent crossovers, % of the chromosome")
+        ax.set_ylabel("pairs of adjacent crossovers")
+        ax.set_title("%s: %d pairs; closer than 20%%: %s× expected" % (NAME[sp], f["pairs"], ff(f["ratio"], 2)),
+                     loc="left", fontsize=9)
+        ax.legend(frameon=False, fontsize=7)
     fig.tight_layout()
-    return save(fig, "fig_coc.png")
+    return save(fig, "fig_interference.png")
 
 
 def fig_diagram():
@@ -835,6 +980,86 @@ def fig_diagram():
     return save(fig, "fig_arm_diagram.png")
 
 
+def oe_log2(H, nper):
+    """log2 observed / expected: expected = mean at the same distance within a chromosome, block mean between."""
+    off = np.cumsum([0] + list(nper))
+    E = np.zeros_like(H)
+    for a in range(len(nper)):
+        for b in range(len(nper)):
+            blk = H[off[a]:off[a + 1], off[b]:off[b + 1]]
+            if a == b:
+                n = nper[a]
+                e = np.zeros_like(blk)
+                for k in range(n):
+                    i = np.arange(n - k)
+                    e[i, i + k] = e[i + k, i] = np.diagonal(blk, k).mean()
+                E[off[a]:off[a + 1], off[b]:off[b + 1]] = e
+            else:
+                E[off[a]:off[a + 1], off[b]:off[b + 1]] = blk.mean()
+    return np.log2((H + 1) / (E + 1))
+
+
+def hic_windows(M, chroms, bin_bp, lens, order):
+    """Sum a bin-level contact matrix into 10 Mb windows of the chromosomes in `order`."""
+    nb = {c: -(-lens[c] // bin_bp) for c in chroms}
+    off, o = {}, 0
+    for c in chroms:
+        off[c], o = o, o + nb[c]
+    sel, grp, nper, k = [], [], [], 0
+    for c in order:
+        nw = max(1, int(round(lens[c] / (WIN_MB * 1e6))))
+        nper.append(nw)
+        for i in range(nw):
+            b0 = min(int(i * WIN_MB * 1e6 // bin_bp), nb[c] - 1)
+            b1 = nb[c] if i == nw - 1 else max(min(int((i + 1) * WIN_MB * 1e6 // bin_bp), nb[c]), b0 + 1)
+            sel += list(range(off[c] + b0, off[c] + b1))
+            grp += [k] * (b1 - b0)
+            k += 1
+    sel, grp = np.array(sel), np.array(grp)
+    starts = np.r_[0, np.where(np.diff(grp) != 0)[0] + 1]
+    Ms = M[np.ix_(sel, sel)].astype(np.float64)
+    return np.add.reduceat(np.add.reduceat(Ms, starts, axis=0), starts, axis=1), nper
+
+
+def fig_hic_dual(sp):
+    """Hi-C on both haplotypes: homologous sequence on two chromosome copies shows as off-diagonal lines."""
+    d = D[sp]
+    base = os.path.join(A.phd_root, "results", d["species"], "qc/hic_remap")
+    p = os.path.join(base, "contacts_all.npz")
+    if not os.path.exists(p):
+        p = os.path.join(base, "contacts_unique.npz")
+    if not (have(p) and "L2n" in d):
+        return None
+    z = np.load(p)
+    M, chroms, bin_bp = z["M"], [str(x) for x in z["chroms"]], int(z["bin"])
+    order = sorted([c for c in chroms if re.match(r"^chr\d+_hap[12]$", c)],
+                   key=lambda c: (int(re.search(r"\d+", c).group()), c[-1]))
+    H, nper = hic_windows(M, chroms, bin_bp, d["L2n"], order)
+    del M
+    R = oe_log2(H, nper)
+    fig, ax = plt.subplots(figsize=(9, 8))
+    im = ax.imshow(R, cmap="RdBu_r", vmin=-2, vmax=2, interpolation="nearest")
+    plt.colorbar(im, ax=ax, fraction=0.035, label="log2 observed / expected")
+    off = np.cumsum([0] + nper)
+    for b in off[1:-1]:
+        ax.axhline(b - 0.5, color="#444441", lw=0.4)
+        ax.axvline(b - 0.5, color="#444441", lw=0.4)
+    ax.set_xticks(off[:-1] + np.array(nper) / 2 - 0.5)
+    ax.set_xticklabels([c.replace("_hap", " h") for c in order], rotation=90, fontsize=6)
+    ax.set_yticks(off[:-1] + np.array(nper) / 2 - 0.5)
+    ax.set_yticklabels([c.replace("_hap", " h") for c in order], fontsize=6)
+    for S2 in JOINS.values():
+        for _, c, mb in S2:
+            if c in order:
+                x = off[order.index(c)] - 0.5 + mb / WIN_MB
+                ax.plot([x, x], [-0.5, off[-1] - 0.5], color="#2C2C2A", lw=0.5, ls=":")
+                ax.plot([-0.5, off[-1] - 0.5], [x, x], color="#2C2C2A", lw=0.5, ls=":")
+    ax.set_title("%s Hi-C on both haplotypes (%s; %g Mb windows; dotted = chr1/chr2 joins)"
+                 % (NAME[sp], os.path.basename(p).replace(".npz", ""), WIN_MB), loc="left", fontsize=9)
+    fig.tight_layout()
+    return save(fig, "fig_hic_both_haplotypes_%s.png" % sp)
+
+
 def fig_link_hic(sp):
     d = D[sp]
     S = d["S"]
@@ -890,9 +1115,10 @@ def fig_link_hic(sp):
     axs[0].set_title("pollen linkage (1 − 2r; dark = inherited together)", loc="left", fontsize=9)
     plt.colorbar(im, ax=axs[0], fraction=0.035)
     if H is not None:
-        Hn = np.log10(H + 1)
-        im = axs[1].imshow(Hn, cmap="Oranges", interpolation="nearest", vmax=np.nanpercentile(Hn, 99.5))
-        axs[1].set_title("Hi-C contacts, MAPQ ≥ 30 (log10; dark = in contact)", loc="left", fontsize=9)
+        Hn = oe_log2(H, [int((wsub.chrom == c).sum()) for c in d["main"]])
+        im = axs[1].imshow(Hn, cmap="RdBu_r", vmin=-2, vmax=2, interpolation="nearest")
+        axs[1].set_title("Hi-C, MAPQ ≥ 30: log2 observed / expected (red = more contact than expected)",
+                         loc="left", fontsize=9)
         plt.colorbar(im, ax=axs[1], fraction=0.035)
     for ax in axs:
         for b in bounds[:-1]:
@@ -949,6 +1175,102 @@ def fig_chrom_landscapes():
     return save(fig, "fig_per_chromosome_landscapes.png")
 
 
+def fig_rdna(sp):
+    d = D[sp]
+    rows = [r for r in d.get("rdna_rows", []) if r[9]]
+    if not rows:
+        return None
+    fig, ax = plt.subplots(figsize=(11, 0.75 * len(d["main"]) + 1.2))
+    co = d.get("co")
+    big = max(d["L"].values()) / 1e6
+    for i, c in enumerate(d["main"]):
+        y = len(d["main"]) - 1 - i
+        ax.add_patch(plt.Rectangle((0, y - 0.12), d["L"][c] / 1e6, 0.24, color="#D3D1C7", lw=0))
+        ax.text(-big * 0.01, y, c, ha="right", va="center", fontsize=8)
+        if co is not None:
+            nb = int(math.ceil(d["L"][c] / 5e6))
+            cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // 5e6).astype(int), nb - 1), minlength=nb)
+            top = max(1.0, float(np.bincount(np.minimum((co.mid // 5e6).astype(int), 10 ** 6)).max()))
+            ax.plot((np.arange(nb) + 0.5) * 5, y + 0.16 + 0.3 * cnt / top, color="#1D9E75", lw=0.9)
+        for _, jc, mb in JOINS.get(d["S"], []):
+            if jc == c:
+                ax.plot([mb], [y - 0.3], marker="^", color="#2C2C2A", ms=6)
+        for r in rows:
+            if r[0] != c:
+                continue
+            x = (r[10] + r[11]) / 2e6
+            sz = 4 + 4 * math.log10(max(r[5], 1))
+            ax.plot([x], [y], marker="s" if r[2] == "45S" else "o", ms=sz, mec="none",
+                    color="#D85A30" if r[2] == "45S" else "#7F77DD", alpha=0.9)
+            if r[5] >= 5:
+                ax.text(x, y + 0.2, "%s×" % fi(r[5]), ha="center", va="bottom", fontsize=6.5)
+    ax.set_xlim(-big * 0.12, big * 1.02)
+    ax.set_ylim(-0.6, len(d["main"]) - 0.3)
+    ax.set_yticks([])
+    ax.set_xlabel("Mb")
+    ax.set_title("%s (%s): the %d of %d rDNA arrays worth trusting\ncomplete 45S units (squares), 5S arrays "
+                 "(circles); size and label = HiFi reads × a typical window; triangles = joins; green = crossovers"
+                 % (NAME[sp], d["S"], len(rows), d["rdna_n_arrays"]), loc="left", fontsize=8.5)
+    for k in ("top", "right", "left"):
+        ax.spines[k].set_visible(False)
+    fig.tight_layout()
+    return save(fig, "fig_rdna_%s.png" % sp)
+
+
+def fig_structure(sp):
+    d = D[sp]
+    if "struct" not in d:
+        return None
+    n = len(d["main"])
+    fig = plt.figure(figsize=(11, 1.55 * n + 0.6))
+    gs = fig.add_gridspec(2 * n, 1, height_ratios=[4, 1] * n, hspace=0.25)
+    big = max(d["L"].values()) / 1e6
+    colk = {"collinear": "#D3D1C7", "INVERTED": "#E24B4A", "TRANSLOCATED": "#EF9F27"}
+    co = d["co"]
+    for i, c in enumerate(d["main"]):
+        ax, ax2 = fig.add_subplot(gs[2 * i]), fig.add_subplot(gs[2 * i + 1])
+        nb = int(math.ceil(d["L"][c] / 5e6))
+        cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // 5e6).astype(int), nb - 1), minlength=nb)
+        ax.bar((np.arange(nb) + 0.5) * 5, 100.0 * cnt / d["ncell_co"] / 5, width=5, color=COL[sp], alpha=0.85)
+        pos = d["good"].pos[d["good"].chrom == c].values
+        mk = np.bincount(np.minimum((pos // 5e6).astype(int), nb - 1), minlength=nb)
+        a3 = ax.twinx()
+        a3.plot((np.arange(nb) + 0.5) * 5, mk / 5, color="#888780", lw=0.8)
+        a3.set_yticks([])
+        a3.spines["right"].set_visible(False)
+        for r in d.get("dead", []):
+            if r[0] == c:
+                a, b = [float(x) for x in r[1].split("–")]
+                ax.axvspan(a, b, color="#85B7EB", alpha=0.25, lw=0)
+        for _, jc, mb in JOINS.get(d["S"], []):
+            if jc == c:
+                for a_ in (ax, ax2):
+                    a_.axvline(mb, color="#2C2C2A", lw=0.9, ls=":")
+        ax.set_xlim(0, big)
+        ax.set_ylabel(c, fontsize=7)
+        ax.tick_params(labelsize=6, labelbottom=False)
+        st = d["struct"][c]
+        ax2.add_patch(plt.Rectangle((0, 0), d["L"][c] / 1e6, 1, color="white", ec="#B4B2A9", lw=0.5))
+        for k in KINDS:
+            for a, b in st[k]:
+                ax2.add_patch(plt.Rectangle((a / 1e6, 0), (b - a) / 1e6, 1, color=colk[k], lw=0))
+        ax2.set_xlim(0, big)
+        ax2.set_ylim(0, 1)
+        ax2.set_yticks([])
+        ax2.tick_params(labelsize=6, labelbottom=(i == n - 1))
+        for k in ("top", "right", "left"):
+            ax2.spines[k].set_visible(False)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=colk[k]) for k in KINDS] + [
+        plt.Rectangle((0, 0), 1, 1, fc="white", ec="#B4B2A9"), plt.Rectangle((0, 0), 1, 1, color="#85B7EB", alpha=0.4)]
+    fig.legend(handles, ["other haplotype collinear", "inverted", "from another chromosome (translocated)",
+                         "no alignment to the other haplotype", "no crossover over >= %d Mb" % d.get("dead_thr", 20)],
+               loc="upper center", ncol=5, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.995))
+    fig.text(0.5, 0.01, "Mb; bars = cM/Mb, grey line = good markers (own scale); dotted = chr1/chr2 joins",
+             ha="center", fontsize=7)
+    fig.subplots_adjust(top=0.965, bottom=0.045, left=0.07, right=0.98)
+    return save(fig, "fig_structure_landscape_%s.png" % sp)
+
+
 def render_pdf(pdf, png_prefix, dpi=75):
     if shutil.which("pdftoppm"):
         subprocess.run(["pdftoppm", "-r", str(dpi), "-png", "-singlefile", pdf, png_prefix], check=True)
@@ -993,8 +1315,16 @@ def cell_browser(sp):
     return outp, idx
 
 
+for sp, d in D.items():
+    if "co" in d:
+        guarded("interference %s" % sp, lambda d=d: interference(d))
+    if "intf" in d:
+        f = d["intf"]
+        put(sp, "interference_pairs", f["pairs"])
+        put(sp, "interference_short_ratio", "%.2f (null range %.2f–%.2f)" % (f["ratio"], f["ratio_lo"], f["ratio_hi"]))
+
 for name, fn in (("markers", fig_markers), ("raw", fig_raw), ("cells", fig_cells), ("per_grain", fig_per_grain),
-                 ("landscape", fig_landscape), ("per_chrom", fig_per_chrom), ("coc", fig_coc),
+                 ("landscape", fig_landscape), ("per_chrom", fig_per_chrom), ("interference", fig_interference),
                  ("chrom_landscapes", fig_chrom_landscapes)):
     FIGS[name] = guarded("figure " + name, fn)
 
@@ -1008,6 +1338,9 @@ if have(PAIRS_FILE):
 for lab, vals in PAIRS:
     NUM["paradoxa.pair." + lab] = " ".join(vals)
 FIGS["diagram"] = guarded("figure arm diagram", fig_diagram)
+FIGS["structure"] = guarded("figure structure landscape", lambda: fig_structure("paradoxa"))
+FIGS["rdna"] = guarded("figure rDNA", lambda: fig_rdna("paradoxa"))
+FIGS["hic_dual"] = guarded("figure Hi-C both haplotypes", lambda: fig_hic_dual("paradoxa"))
 for sp in D:
     FIGS["linkhic_" + sp] = guarded("figure linkage vs Hi-C " + sp, lambda sp=sp: fig_link_hic(sp))
 EXAMPLES = guarded("example cells", example_cells) or {}
@@ -1351,43 +1684,105 @@ for sp, d in D.items():
         H.append(table(["chromosome", "Mb", "crossovers", "expected", "p", "within 10 Mb of a join"], d["busiest"]))
 H.append(img(FIGS.get("per_chrom")))
 H.append("<h3>Crossover interference</h3>")
-H.append(img(FIGS.get("coc")))
-H.append(P("Coefficient of coincidence: observed double crossovers between two intervals over the number expected "
-           "if they were independent, by the distance between the intervals (recombination_landscape.R); "
-           "values below 1 at short distance mean interference."))
+H.append(img(FIGS.get("interference")))
+H.append(P("For every nucleus and chromosome with two or more crossovers, the distance between neighbouring crossovers "
+           "as a share of the chromosome; the line is what the same crossovers would give if placed independently "
+           "(drawn from that chromosome's crossover positions, 300 times; band = 95%%). Interference shows as too few "
+           "close pairs. Closer than 20%% of the chromosome: <i>D. binata</i> %s× expected (%s pairs), "
+           "<i>D. paradoxa</i> %s× (%s pairs; crossovers at the joins left out). This replaces the coefficient-of-"
+           "coincidence curve, which needs more double crossovers than <i>D. paradoxa</i>'s %s nuclei give."
+           % (ff(B.get("intf", {}).get("ratio"), 2), B.get("intf", {}).get("pairs", "–"),
+              ff(Pd.get("intf", {}).get("ratio"), 2), Pd.get("intf", {}).get("pairs", "–"), fi(Pd.get("ncell_co")))))
+if FIGS.get("structure"):
+    H.append("<h3><i>D. paradoxa</i>: crossovers along each chromosome against the structure of its homolog</h3>")
+    H.append(img(FIGS.get("structure")))
+    H.append(P("Under each chromosome: where the other haplotype's copy aligns to it (hap2 on hap1, synteny blocks from "
+               "translocation_map.py), collinear, inverted or from a differently numbered chromosome, and where nothing "
+               "aligns. Blue shading: stretches without a crossover in any of the %s nuclei, long enough to be unlikely by "
+               "chance (table below). On chr1_hap1 and "
+               "chr2_hap2 the arms beyond the joins (P and Q) have no partner in the other haplotype by construction: "
+               "their partners are the other chr1/chr2 homolog (section 7)." % fi(Pd.get("ncell_co"))))
+if Pd.get("dead") is not None:
+    dc = Pd["dead_chance"]
+    H.append(P("<b>Stretches without crossovers</b> (crossovers at the joins left out). With %s crossovers per grain, "
+               "gaps up to %d Mb arise by chance, so only stretches of at least %d Mb are listed: %d, %s Mb in total, "
+               "against %s expected if the same crossovers fell uniformly along each chromosome (95%% range %s–%s). "
+               "What each overlaps:"
+               % (ff(Pd.get("co_mean_nj", Pd.get("co_mean")), 2), Pd["dead_thr"] - 5, Pd["dead_thr"], len(Pd["dead"]),
+                  ff(Pd["dead_mb"], 0), ff(dc[0]), ff(dc[1], 0), ff(dc[2], 0))))
+    H.append(table(["chromosome", "Mb", "length, Mb", "inverted, %", "translocated, %", "no homolog, %",
+                    "markers vs chromosome median", "contains a join", "most likely reason"], Pd["dead"]))
 
 # ---- 7
 H.append("<h2>7. Is each reference right?</h2>")
 H.append(P("Pollen linkage: for every pair of %g Mb windows, r = share of nuclei whose genotypes disagree (0 = always "
            "inherited together, 0.5 = independent), shown as 1 − 2r. In a correct reference every chromosome is one "
-           "dark block on the diagonal and everything off it is pale. Next to it, the Hi-C contact map of the same "
-           "windows: the physical molecules in the plant's tissue." % WIN_MB))
+           "dark block on the diagonal and everything off it is pale. Next to it, Hi-C on the same windows as observed "
+           "over expected contacts: the molecules in the plant's tissue. Hi-C reads come from one chromosome copy at a "
+           "time, so on a one-haplotype reference it shows each chromosome as assembled (no misjoins) but cannot show "
+           "a translocation between the two copies; pollen linkage can, as off-diagonal blocks. The map on both "
+           "haplotypes below shows where the copies' sequences relate." % WIN_MB))
 for sp in D:
     H.append("<h3>%s</h3>" % NAME[sp])
     H.append(img(FIGS.get("linkhic_" + sp)))
     H.append(details("linkage scan summary", "qc/linkage/%s/linkage_summary.txt" % D[sp]["S"]))
+if FIGS.get("hic_dual"):
+    H.append("<h3><i>D. paradoxa</i>: Hi-C on both haplotypes</h3>")
+    H.append(img(FIGS.get("hic_dual"), 80))
+    H.append(P("All twelve chromosomes, hap1 and hap2 of each number side by side, as observed over expected contacts. "
+               "Reads that could sit on either copy of a sequence link the two copies, so off-diagonal lines between "
+               "a hap1 and a hap2 chromosome mark homologous sequence: for a collinear pair a line along the diagonal "
+               "of their block, for the chr1/chr2 arms a line that changes partner at the dotted join."))
 H.append("<h3><i>D. paradoxa</i>: chromosomes 1 and 2 in the tissue and in the pollen</h3>")
 H.append(img(FIGS.get("diagram")))
 H.append(P("Names: L1 and L2 are the left arms of chr1 and chr2, P and Q the right arms; each arm exists twice. "
            "A, B, C and D are the four assembled chromosomes; the crossover reference used so far (%s) contains A and D "
            "plus chr3–6 hap1. Hi-C supports all four as continuous molecules, yet the pollen inherit L1 with Q and L2 "
            "with P. Window pairs behind the diagram:" % Pd["S"]))
+
+
+def binom_p(k, n):
+    pk = [math.comb(n, i) * 0.5 ** n for i in range(n + 1)]
+    return min(1.0, sum(p for p in pk if p <= pk[k] * (1 + 1e-9)))
+
+
 if PAIRS:
-    H.append(table(["window pair", "REF-REF", "REF-ALT", "ALT-REF", "ALT-ALT", "nuclei", "r"],
-                   [[lab] + vals for lab, vals in PAIRS]))
-H.append("<h3>rDNA: where the canonical arrays are (HiFi read depth)</h3>")
-H.append(P("barrnap finds rRNA genes in many places, but an assembled copy says little about array size: a large "
-           "array collapses to a few copies in the assembly while its reads pile up there. Reads over each array "
-           "against a typical 20 kb window estimate how many copies collapsed into it."))
+    prow = []
+    for lab, v in PAIRS:
+        rr, ra, ar, aa, n, r = int(v[0]), int(v[1]), int(v[2]), int(v[3]), int(v[4]), float(v[5])
+        r1, r2 = rr + ra, rr + ar
+        e_same = (r1 * r2 + (n - r1) * (n - r2)) / max(n, 1)
+        reading = "inherited together" if r <= 0.15 else ("independent" if r >= 0.35 else "partly linked")
+        prow.append([lab, rr, ra, ar, aa, n, "%.2f" % r, "%d / %.1f" % (rr + aa, e_same),
+                     "%d:%d (p %.2g)" % (r1, n - r1, binom_p(r1, n)), "%d:%d (p %.2g)" % (r2, n - r2, binom_p(r2, n)),
+                     reading])
+    H.append(table(["window pair", "REF-REF", "REF-ALT", "ALT-REF", "ALT-ALT", "nuclei", "r",
+                    "same-type pairs: observed / expected if independent", "window 1 REF:ALT (p)",
+                    "window 2 REF:ALT (p)", "reading"], prow))
+    H.append(P("How to read it: when two windows are inherited independently all four classes appear, including the "
+               "two that look like an intact tissue chromosome (REF-REF and ALT-ALT), and they appear about as often as "
+               "chance predicts (the 'observed / expected if independent' column). When they are inherited together "
+               "only REF-REF and ALT-ALT appear. So nuclei that carry A's L1 with A's P exist, but no more often than "
+               "if L1 and P were on different chromosomes. The REF:ALT columns test each window for segregation bias "
+               "(two-sided binomial against 50:50)."))
+H.append("<h3>rDNA: which arrays are real and large (HiFi read depth)</h3>")
+H.append(P("barrnap finds rRNA gene fragments in many places, but an assembled copy says little about array size: a "
+           "large array collapses to a few copies in the assembly while its reads pile up there. Reads over each array "
+           "against a typical 20 kb window estimate how many copies collapsed into it. Trusted here: a complete 45S "
+           "unit (18S and 28S together), at least 5× the reads of a typical window, or at least 50 assembled 5S genes."))
+H.append(img(FIGS.get("rdna")))
 for sp, d in D.items():
     if d.get("rdna_rows"):
-        H.append("<p><b>%s</b> (%s): typical 20 kb window %s reads; top arrays by excess</p>"
-                 % (NAME[sp], d["S"], ff(d["rdna_base"], 0)))
-        H.append(table(["chromosome", "Mb", "type", "genes", "HiFi reads", "× a typical window", "join nearby"],
-                       [[r[0], r[1], r[2], r[3], fi(r[4]), fi(r[5]), r[6]] for r in d["rdna_rows"][:10]]))
+        keep = [r for r in d["rdna_rows"] if r[9] or r[6]]
+        H.append("<p><b>%s</b> (%s): %d arrays, %d trusted; typical 20 kb window %s reads. Trusted arrays and every "
+                 "array within 5 Mb of a join:</p>" % (NAME[sp], d["S"], d["rdna_n_arrays"], d["rdna_n_trust"],
+                                                       ff(d["rdna_base"], 0)))
+        H.append(table(["chromosome", "Mb", "type", "genes", "complete 45S unit", "HiFi reads", "× a typical window",
+                        "trusted", "join nearby"],
+                       [[r[0], r[1], r[2], r[3], "yes" if r[7] else "", fi(r[4]), fi(r[5]), "yes" if r[9] else "",
+                         r[6]] for r in keep[:15]]))
     elif d.get("rdna_note"):
         H.append(P("%s: rDNA depth %s" % (NAME[sp], d["rdna_note"])))
-H.append(img("qc/rdna/rdna_overview.png", 90))
 for t, p in (("Hi-C, every library at the joins", os.path.join(A.phd_root, "results/Drosera_paradoxa/qc/hic_remap/library_joins.txt")),
              ("chr5 against chr6", "qc/linkage/Dparadoxa_std/chr5_chr6_check.txt"),
              ("rDNA arrays, crossover hotspots and joins", "qc/rdna/rdna_overview.txt"),
