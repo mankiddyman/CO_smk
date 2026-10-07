@@ -14,6 +14,10 @@ Usage (from the CO_smk root):
   supervisor_report.py [--binata Dbinata_hap1] [--paradoxa Dparadoxa_std] [--out reports/supervisor]
                        [--no_cell_pdfs]
 Writes OUT/report.html, OUT/cells_<sample>.pdf, OUT/fig/*.png and OUT/numbers.txt.
+
+D. paradoxa references: Dparadoxa_std (A + D, chr1/chr2 joined as assembled) or Dparadoxa_CB (C + B, joined as the
+pollen inherit them). Crossovers near joins the pollen do not support (ARTEFACT_JOINS) are shown with and without;
+on CB they are kept and only counted against the chromosome's average. All text names the arms of the reference used.
 """
 import argparse
 import base64
@@ -58,6 +62,17 @@ ARMSPAN = {"chr1_hap1": (262.9, "L1", "P"), "chr2_hap2": (215.0, "L2", "Q"),   #
            "chr1_hap2": (262.0, "L1", "Q"), "chr2_hap1": (211.0, "L2", "P")}   # C, B
 ARMNAME = {"chr1_hap1": "A", "chr1_hap2": "C", "chr2_hap1": "B", "chr2_hap2": "D"}
 PAIRS_FILE = "qc/linkage/Dparadoxa_std/pollen_pairs_check.txt"   # the conflict is measured on A + D
+# References whose chr1/chr2 joins the pollen do NOT support (linkage r ~ 0.5 across them): crossovers within 10 Mb
+# of these joins are an artefact and are shown with and without. On Dparadoxa_CB the joins are as the pollen inherit
+# them, so crossovers there are kept and only counted against the chromosome's average.
+ARTEFACT_JOINS = {"Dparadoxa_std"}
+
+
+def join_names(S):
+    """('chr1_hap2 and chr2_hap1', 'C and B', 'Q and P') for the reference's two chr1/chr2 joins."""
+    js = JOINS.get(S, [])
+    return (" and ".join(c for _, c, _ in js), " and ".join(ARMNAME.get(c, c) for _, c, _ in js),
+            " and ".join(ARMSPAN[c][2] for _, c, _ in js if c in ARMSPAN))
 WIN_MB, MIN_MOL, BINS, NBOOT = 10, 3, 20, 500
 USED, MISSING, NUM, PROBLEMS = [], [], {}, []
 rng = np.random.default_rng(1)
@@ -277,9 +292,15 @@ for sp, S in SPP:
         co = co[co.chrom.isin(main)].copy()
         co["mid"] = (co.start + co.end) / 2
         co["u"] = co.mid / co.chrom.map(d["L"])
-        co["near_join"] = False
+        co["at_join"] = False
         for _, c, mb in JOINS.get(S, []):
-            co.loc[(co.chrom == c) & ((co.mid - mb * 1e6).abs() <= 10e6), "near_join"] = True
+            co.loc[(co.chrom == c) & ((co.mid - mb * 1e6).abs() <= 10e6), "at_join"] = True
+        co["near_join"] = co.at_join & (S in ARTEFACT_JOINS)     # left out of the "without joins" versions
+        if JOINS.get(S):
+            # observed within 10 Mb of the joins, against the chromosome's own average for any 20 Mb
+            d["at_join_cos"] = int(co.at_join.sum())
+            d["at_join_exp"] = float(sum((co.chrom == c).sum() * 20e6 / d["L"][c]
+                                         for _, c, _ in JOINS[S] if c in d["L"]))
         d["co"] = co
     p = "results/landscape/%s/coc_table.tsv" % S
     if have(p):
@@ -680,7 +701,7 @@ for sp, d in D.items():
               "raw_share_cand", "raw_share_dp_low", "raw_share_dp_high", "raw_share_qual_fail", "raw_share_ab_fail",
               "raw_share_pass", "pair_sim_median", "dup_pairs", "dup_cells", "distinct_genotypes", "called_share",
               "ncell_co", "co_total", "co_mean", "co_sd", "co_median", "co_mean_nj", "below_obligate",
-              "width_median_kb", "U_markers", "U_genes", "join_cos", "rho_markers", "window_mean", "shape", "shape_nj",
+              "width_median_kb", "U_markers", "U_genes", "join_cos", "at_join_cos", "at_join_exp", "rho_markers", "window_mean", "shape", "shape_nj",
               "asm2n", "rdna_base", "rdna_45s_n", "rdna_45s_complete", "rdna_n_arrays", "rdna_n_trust", "dead_mb"):
         if k in d:
             put(sp, k, d[k])
@@ -1665,8 +1686,11 @@ H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
     ["crossovers", fi(B.get("co_total")), fi(Pd.get("co_total"))],
     ["per grain, mean (SD); median", "%s (%s); %s" % (ff(B.get("co_mean"), 2), ff(B.get("co_sd"), 2), ff(B.get("co_median"), 0)),
      "%s (%s); %s" % (ff(Pd.get("co_mean"), 2), ff(Pd.get("co_sd"), 2), ff(Pd.get("co_median"), 0))],
-    ["crossovers within 10 Mb of a translocation join (reference artefact)", "–", fi(Pd.get("join_cos"))],
-    ["per grain without them", "–", ff(Pd.get("co_mean_nj"), 2)],
+    ["crossovers within 10 Mb of the chr1/chr2 joins (%s), observed / expected at the chromosome's average"
+     % ("joins the pollen do not support: reference artefact" if Pd["S"] in ARTEFACT_JOINS
+        else "joined as the pollen inherit them: no excess expected"),
+     "–", "%s / %s" % (fi(Pd.get("at_join_cos")), ff(Pd.get("at_join_exp"), 1)) if "at_join_cos" in Pd else "–"],
+    ["per grain without them", "–", ff(Pd.get("co_mean_nj"), 2) if "co_mean_nj" in Pd else "not applicable"],
     ["obligate minimum per grain (n / 2)", ff(B["n"] / 2), ff(Pd["n"] / 2)],
     ["grains below the minimum", "%s of %s" % (fi(B.get("below_obligate")), fi(B.get("ncell_co"))),
      "%s of %s" % (fi(Pd.get("below_obligate")), fi(Pd.get("ncell_co")))],
@@ -1706,26 +1730,28 @@ H.append(P("For every nucleus and chromosome with two or more crossovers, the di
            "as a share of the chromosome; the line is what the same crossovers would give if placed independently "
            "(drawn from that chromosome's crossover positions, 300 times; band = 95%%). Interference shows as too few "
            "close pairs. Closer than 20%% of the chromosome: <i>D. binata</i> %s× expected (%s pairs), "
-           "<i>D. paradoxa</i> %s× (%s pairs; crossovers at the joins left out). This replaces the coefficient-of-"
+           "<i>D. paradoxa</i> %s× (%s pairs%s). This replaces the coefficient-of-"
            "coincidence curve, which needs more double crossovers than <i>D. paradoxa</i>'s %s nuclei give."
            % (ff(B.get("intf", {}).get("ratio"), 2), B.get("intf", {}).get("pairs", "–"),
-              ff(Pd.get("intf", {}).get("ratio"), 2), Pd.get("intf", {}).get("pairs", "–"), fi(Pd.get("ncell_co")))))
+              ff(Pd.get("intf", {}).get("ratio"), 2), Pd.get("intf", {}).get("pairs", "–"),
+              "; crossovers at the joins left out" if Pd["S"] in ARTEFACT_JOINS else "", fi(Pd.get("ncell_co")))))
 if FIGS.get("structure"):
     H.append("<h3><i>D. paradoxa</i>: crossovers along each chromosome against the structure of its homolog</h3>")
     H.append(img(FIGS.get("structure")))
     H.append(P("Under each chromosome: where the other haplotype's copy aligns to it (hap2 on hap1, synteny blocks from "
                "translocation_map.py), collinear, inverted or from a differently numbered chromosome, and where nothing "
                "aligns. Black bars: stretches without a crossover in any of the %s nuclei, long enough to be unlikely by "
-               "chance (table below). Arm colours as in the chr1/chr2 diagram. On chr1_hap1 and "
-               "chr2_hap2 the arms beyond the joins (P and Q) have no partner in the other haplotype by construction: "
-               "their partners are the other chr1/chr2 homolog (section 7)." % fi(Pd.get("ncell_co"))))
+               "chance (table below). Arm colours as in the chr1/chr2 diagram. On %s the arms beyond the joins "
+               "(%s) have no partner in the other haplotype by construction: their partners are the other chr1/chr2 "
+               "homolog (section 7)." % (fi(Pd.get("ncell_co")), join_names(Pd["S"])[0], join_names(Pd["S"])[2])))
 if Pd.get("dead") is not None:
     dc = Pd["dead_chance"]
-    H.append(P("<b>Stretches without crossovers</b> (crossovers at the joins left out). With %s crossovers per grain, "
+    H.append(P("<b>Stretches without crossovers</b>%s. With %s crossovers per grain, "
                "gaps up to %d Mb arise by chance, so only stretches of at least %d Mb are listed: %d, %s Mb in total, "
                "against %s expected if the same crossovers fell uniformly along each chromosome (95%% range %s–%s). "
                "What each overlaps:"
-               % (ff(Pd.get("co_mean_nj", Pd.get("co_mean")), 2), Pd["dead_thr"] - 5, Pd["dead_thr"], len(Pd["dead"]),
+               % (" (crossovers at the joins left out)" if Pd["S"] in ARTEFACT_JOINS else "",
+                  ff(Pd.get("co_mean_nj", Pd.get("co_mean")), 2), Pd["dead_thr"] - 5, Pd["dead_thr"], len(Pd["dead"]),
                   ff(Pd["dead_mb"], 0), ff(dc[0]), ff(dc[1], 0), ff(dc[2], 0))))
     H.append(table(["chromosome", "Mb", "length, Mb", "inverted, %", "translocated, %", "no homolog, %",
                     "markers vs chromosome median", "contains a join", "most likely reason"], Pd["dead"]))
@@ -1755,9 +1781,9 @@ if FIGS.get("hic_dual"):
 H.append("<h3><i>D. paradoxa</i>: chromosomes 1 and 2 in the tissue and in the pollen</h3>")
 H.append(img(FIGS.get("diagram")))
 H.append(P("Names: L1 and L2 are the left arms of chr1 and chr2, P and Q the right arms; each arm exists twice. "
-           "A, B, C and D are the four assembled chromosomes; the crossover reference used so far (%s) contains A and D "
+           "A, B, C and D are the four assembled chromosomes; the crossover reference used here (%s) contains %s "
            "plus chr3–6 hap1. Hi-C supports all four as continuous molecules, yet the pollen inherit L1 with Q and L2 "
-           "with P. Window pairs behind the diagram:" % Pd["S"]))
+           "with P. Window pairs behind the diagram (measured on A + D):" % (Pd["S"], join_names(Pd["S"])[1])))
 
 
 def binom_p(k, n):
@@ -1830,13 +1856,17 @@ H.append("<ul><li>Markers come from pollen RNA and sit in expressed genes (%s%% 
             fi(len(Pd["cells"])), fi(Pd.get("selected_molecules_median")), fi(len(B["cells"])),
             fi(B.get("selected_molecules_median")), B.get("dup_pairs", "–"), Pd.get("dup_pairs", "–"), ref_line))
 H.append("<h2>9. Next steps and asks</h2>")
-H.append("<ul><li><i>D. paradoxa</i> on the reference joined as the pollen inherit it (chr1_hap2 + chr2_hap1): %s.</li>"
+H.append("<ul><li>%s</li>"
          "<li>Cytology: meiotic chromosome spreads with oligo-FISH paints for the chr1/chr2 arms, chr5 and chr6, and "
          "45S rDNA FISH.</li>"
          "<li>Count near-identical nuclei once, in both species.</li>"
          "<li>Tune the crossover-calling settings: minor for <i>D. binata</i>; for <i>D. paradoxa</i> on the review panel "
          "once the reference is settled.</li></ul>"
-         % ("results in section 7" if os.path.exists("qc/linkage/Dparadoxa_CB/cb_check.txt") else "running"))
+         % ("<i>D. paradoxa</i> on the reference joined as the pollen inherit it (chr1_hap2 + chr2_hap1): %s."
+            % ("results in section 7" if os.path.exists("qc/linkage/Dparadoxa_CB/cb_check.txt") else "running")
+            if Pd["S"] == "Dparadoxa_std" else
+            "<i>D. paradoxa</i> crossovers are now called on %s (%s); the comparison with A + D, join by join, is in "
+            "section 7 (crossover reference C + B against A + D)." % (Pd["S"], join_names(Pd["S"])[1])))
 
 # ---- appendix
 H.append("<h2>Appendix</h2><h3>A. Per-chromosome landscapes</h3>")
