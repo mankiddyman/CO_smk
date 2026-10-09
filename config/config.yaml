@@ -884,6 +884,27 @@ mapping_reference:
     # (r 0.56) while L1 goes with Q (0.04) and L2 with P (0.00), which put a false
     # crossover hotspot at both joins. Hi-C supports chr1_hap2 and chr2_hap1 as real
     # molecules (reproducible_phd qc/hic_remap).
+  Dparadoxa_split:
+    _approved: "2026-10-09 | Dparadoxa_CB cut at its three translocation breakpoints, so no join between translocated pieces is assumed; config/split_plans/Dparadoxa_split.csv"
+    from_sample: Dparadoxa_hap1
+    pieces: config/split_plans/Dparadoxa_split.csv
+    # The same sequence as Dparadoxa_CB, cut where a translocation joins two pieces:
+    # where the chromosome's homolog in the other haplotype changes, read from the
+    # hap2-on-hap1 alignment (workflow/scripts/breakpoints_from_paf.py on
+    # results/hap_align/Dparadoxa_hap1/hap2_on_hap1.paf; report and figures in
+    # qc/reference/Dparadoxa_split/breakpoints.txt, homolog_paint.png, breakpoints_zoom.png):
+    #   chr1_hap2 (C) = L1 | Q      chr2_hap1 (B) = L2 | P
+    #   chr4_hap1     = X | core    X = the start of chr4_hap1, which hap2 carries at the end of chr3
+    # chr3_hap1, chr5_hap1 and chr6_hap1 stay whole: each is matched by its homolog end
+    # to end (chr5/chr6 are linked in the pollen with no exchange in the alignment or
+    # the Hi-C). Each piece is a sequence of its own, so a crossover can only be called
+    # inside a piece, and how the pieces travel together is measured from the pollen
+    # (linkage_scan, chrom_haploidness) instead of being fixed by the reference. For the
+    # cell-selection evidence floor the pieces of one chromosome are counted together
+    # (haplotype_tracks.py), so the cells chosen are essentially those of Dparadoxa_CB
+    # (haploidness windows restart at each piece: a few cells near the threshold can
+    # differ). Purpose: count crossovers and check dosage per arm with no translocation
+    # join in the reference, and tune the crossover-calling settings on that.
 
 reference_copy_check:
   max_bad_mb: 20   # Mb allowed in runs (>= 5 Mb) of duplicated or absent sequence; divergent sequence
@@ -906,3 +927,10 @@ call_by_region:
     mb: 5
     chromosomes: [chr1_hap2, chr2_hap1, chr4_hap1]
     check: "chr5_hap1:1-2000000"
+  Dparadoxa_split:
+    mb: 5
+    chromosomes: [chr1_hap2_L1, chr1_hap2_Q, chr2_hap1_L2, chr2_hap1_P, chr4_hap1_X, chr4_hap1_core]
+    check: "chr5_hap1:1-2000000"
+    # Only the pieces' own names. chr3/chr5/chr6_hap1 keep whole-chromosome names that
+    # other samples call whole, and these rules match by name, so they are called
+    # whole here too: the longest (chr6_hap1) sets the same critical path as Dparadoxa_CB.

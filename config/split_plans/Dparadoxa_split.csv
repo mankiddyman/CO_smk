@@ -1,0 +1,11 @@
+# split plan Dparadoxa_split, made by workflow/scripts/breakpoints_from_paf.py from results/hap_align/Dparadoxa_hap1/hap2_on_hap1.paf and results/reference/Dparadoxa_CB/genome.fa.fai; report: qc/reference/Dparadoxa_split/breakpoints.txt
+piece,source,start,end,length,how
+chr1_hap2_L1,chr1_hap2,1,263300255,263300255,homolog chr1_hap1; cut 263.300 Mb
+chr1_hap2_Q,chr1_hap2,263300256,371871560,108571305,homolog none (no copy in hap1)
+chr2_hap1_L2,chr2_hap1,1,211261378,211261378,homolog chr2_hap2; cut 211.261 Mb
+chr2_hap1_P,chr2_hap1,211261379,355015077,143753699,homolog none (no copy in hap2)
+chr3_hap1,chr3_hap1,1,281198221,281198221,whole: one homolog end to end
+chr4_hap1_X,chr4_hap1,1,85543885,85543885,homolog chr3_hap2; cut 85.544 Mb
+chr4_hap1_core,chr4_hap1,85543886,476419562,390875677,homolog chr4_hap2
+chr5_hap1,chr5_hap1,1,292887249,292887249,whole: one homolog end to end
+chr6_hap1,chr6_hap1,1,359529523,359529523,whole: one homolog end to end

@@ -1456,10 +1456,15 @@ rule mapping_reference:
     """A haploid mapping reference cut from the dual assembly by an explicit
     chromosome list (config: mapping_reference.<sample>.chromosomes): FASTA,
     index, contigs.txt, GFF3 subset, and a MANIFEST.txt naming the dual
-    assembly and annotation (read from the from_sample's MANIFEST)."""
+    assembly and annotation (read from the from_sample's MANIFEST).
+    Or by a split plan (.pieces, from breakpoints_from_paf.py): chromosomes cut
+    at translocation breakpoints into pieces that are sequences of their own, with
+    pieces.tsv saying where each comes from and the GFF moved to piece
+    coordinates (2026-10-09, Dparadoxa_split)."""
     input:
         manifest = lambda w: os.path.join(os.path.dirname(
             samples.loc[MAPREF[w.sample]["from_sample"], "assembly_fasta"]), "MANIFEST.txt"),
+        plan = lambda w: [MAPREF[w.sample]["pieces"]] if "pieces" in MAPREF[w.sample] else [],
     output:
         fasta = "results/reference/{sample}/genome.fa",
         fai = "results/reference/{sample}/genome.fa.fai",
@@ -1467,7 +1472,8 @@ rule mapping_reference:
         gff = "results/reference/{sample}/annotation.gff3",
         manifest = "results/reference/{sample}/MANIFEST.txt",
     params:
-        chroms = lambda w: ",".join(MAPREF[w.sample]["chromosomes"]),
+        chroms = lambda w: ("@" + MAPREF[w.sample]["pieces"] if "pieces" in MAPREF[w.sample]
+                            else ",".join(MAPREF[w.sample]["chromosomes"])),
     log: "logs/mapping_reference/{sample}.log"
     wildcard_constraints:
         sample = "|".join(MAPREF) if MAPREF else "NO_MAPPING_REFERENCE",

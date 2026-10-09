@@ -100,13 +100,41 @@ mol_sw = np.bincount(mc[1:][same_run & (mg[1:] != mg[:-1])], minlength=ncell)
 mol_pairs = np.bincount(mc[1:][same_run], minlength=ncell)
 n_mol = np.bincount(mc, minlength=ncell)
 # molecules per cell on each MAIN chromosome (>= 0.5% of all molecules, so a
-# stray scaffold cannot make every cell's weakest chromosome zero)
-share = np.bincount(mch, minlength=len(chrom_names)) / float(nm)
-main = np.where(share >= 0.005)[0]
+# stray scaffold cannot make every cell's weakest chromosome zero). On a reference
+# cut into pieces (pieces.tsv beside the sample's assembly_fasta, written by
+# build_mapping_reference.py) the pieces of one source chromosome are counted
+# together: the floor asks for enough evidence on every chromosome, and a piece is
+# part of one, so cutting the reference does not change which cells pass.
+def source_of(names):
+    import csv
+    src = {}
+    try:
+        row = next((r for r in csv.DictReader(open("config/samples.csv")) if r.get("sample_id") == SAMPLE), None)
+        pf = os.path.join(os.path.dirname(row["assembly_fasta"]), "pieces.tsv") if row else ""
+        if pf and os.path.exists(pf):
+            src = {r["piece"]: r["source"] for r in csv.DictReader(open(pf), delimiter="\t")}
+    except (OSError, KeyError):
+        src = {}
+    return np.array([src.get(str(x), str(x)) for x in names])
+
+
 per_chrom = np.zeros((ncell, len(chrom_names)), dtype=np.int64)
 np.add.at(per_chrom, (mc, mch), 1)
-pcm = per_chrom[:, main]
-main_names = np.array([str(x) for x in chrom_names])[main]
+unit = source_of(chrom_names)
+units, uidx = np.unique(unit, return_inverse=True)
+if len(units) == len(chrom_names):                      # one sequence per chromosome: as before
+    units, per_unit = np.array([str(x) for x in chrom_names]), per_chrom
+else:
+    per_unit = np.zeros((ncell, len(units)), dtype=np.int64)
+    for k in range(len(chrom_names)):
+        per_unit[:, uidx[k]] += per_chrom[:, k]
+    say("  pieces counted with their source chromosome for the evidence floor: %s"
+        % "; ".join("%s = %s" % (u, " + ".join(str(chrom_names[k]) for k in range(len(chrom_names)) if uidx[k] == j))
+                    for j, u in enumerate(units) if (uidx == j).sum() > 1))
+share = per_unit.sum(axis=0) / float(nm)
+main = np.where(share >= 0.005)[0]
+pcm = per_unit[:, main]
+main_names = units[main]
 min_chrom = pcm.min(axis=1)
 weak_chrom = main_names[pcm.argmin(axis=1)]
 
