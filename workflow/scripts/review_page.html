@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossover review</title>
+<!-- template for review_page.py: the data are put where the DATA marker is -->
+<style>
+:root { --fg:#111827; --muted:#6b7280; --line:#e5e7eb; --panel:#f8fafc; }
+* { box-sizing: border-box; }
+body { margin:0; font:13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--fg); background:#fff; }
+header { position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid var(--line); padding:6px 12px 4px; }
+#row1 { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; }
+#title { font-weight:700; font-size:14px; }
+#cellinfo b { font-weight:600; }
+.badge { display:inline-block; padding:1px 7px; border-radius:9px; font-size:12px; background:#eef2f7; color:#374151; }
+.badge.on { background:#7c3aed; color:#fff; }
+.badge.warn { background:#fee2e2; color:#991b1b; }
+.badge.ok { background:#dcfce7; color:#166534; }
+button, .btn { font:inherit; font-size:12px; padding:2px 9px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; cursor:pointer; }
+.btn input { display:none; }
+#strip { margin-top:5px; line-height:0; }
+#strip span { display:inline-block; width:9px; height:12px; margin:0 1px 1px 0; border-radius:2px; background:#fdba74; cursor:pointer; }
+#strip span.part { background:#fde047; }
+#strip span.done { background:#86efac; }
+#strip span.none { background:#e5e7eb; }
+#strip span.bad { background:#374151; }
+#strip span.cur { outline:2px solid #111827; outline-offset:0; }
+#legend { margin-top:4px; color:var(--muted); font-size:11.5px; }
+#legend i { font-style:normal; display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin:0 3px 0 8px; }
+#main { display:flex; flex-wrap:wrap; align-items:flex-start; }
+#cellwrap { flex:1 1 900px; min-width:640px; padding:4px 0 0; }
+#cv { display:block; cursor:crosshair; }
+#side { flex:0 1 600px; min-width:440px; padding:6px 12px 30px 10px; border-left:1px solid var(--line);
+  position:sticky; top:var(--headh, 96px); max-height:calc(100vh - var(--headh, 96px)); overflow:auto; }
+#zoomcol { width:100%; }
+#zv { display:block; }
+#info { margin-top:4px; font-size:12.5px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+#info .k { color:var(--muted); }
+#info .all { color:#166534; } #info .none { color:#9ca3af; } #info .some { color:#92400e; font-weight:600; }
+#scorecol { margin-top:8px; }
+#tally { font-size:12px; color:#374151; margin-bottom:4px; }
+table { border-collapse:collapse; font-size:12px; width:100%; }
+th, td { padding:2px 5px; text-align:right; border-bottom:1px solid #f1f5f9; white-space:nowrap; }
+th { cursor:pointer; color:#374151; background:var(--panel); position:sticky; top:0; }
+td:first-child, th:first-child { text-align:left; }
+tr.pin td { background:#fffbeb; }
+tr.hl td { background:#ede9fe; }
+tr:hover td { background:#f1f5f9; cursor:pointer; }
+#marg { margin-top:8px; font-size:12px; }
+#marg td { text-align:left; }
+.overlay { position:fixed; inset:40px 10% auto 10%; background:#fff; border:1px solid #cbd5e1; border-radius:10px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18); padding:16px 22px; z-index:20; max-height:85vh; overflow:auto; }
+.overlay h3 { margin:4px 0 8px; }
+.overlay td, .overlay th { text-align:left; white-space:normal; }
+kbd { font:600 11.5px ui-monospace, monospace; padding:0 5px; border:1px solid #cbd5e1; border-bottom-width:2px; border-radius:4px; background:#f8fafc; }
+#flash { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:6px 14px;
+  border-radius:8px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:30; }
+#flash.show { opacity:.94; }
+</style>
+</head>
+<body>
+<header>
+  <div id="row1">
+    <span id="title"></span>
+    <span id="cellinfo"></span>
+    <span id="progress"></span>
+    <span id="modes"></span>
+    <span style="margin-left:auto"></span>
+    <button id="bexp" title="download every verdict as verdicts_SAMPLE.csv (key e)">export verdicts.csv</button>
+    <label class="btn" title="read a verdicts csv exported from this page">import<input type="file" id="fimp" accept=".csv,text/csv"></label>
+    <button id="bhelp">keys (h)</button>
+  </div>
+  <div id="strip"></div>
+  <div id="legend"></div>
+</header>
+<div id="main">
+  <div id="cellwrap"><canvas id="cv"></canvas></div>
+  <div id="side">
+    <div id="zoomcol"><canvas id="zv"></canvas><div id="info"></div></div>
+    <div id="scorecol"><div id="tally"></div><table id="score"></table><div id="marg"></div></div>
+  </div>
+</div>
+<div id="help" class="overlay" hidden></div>
+<div id="flash"></div>
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const NS = D.settings.length, EV = D.events, CELLS = D.cells;
+const COL = { ref: "#d62728", alt: "#1f77b4", refL: "#f3a6a6", altL: "#a8c8e8", mixL: "#d6b6e8",
+  review: "#f97316", real: "#16a34a", auto: "#86c98f", "false": "#374151", unsure: "#ca8a04", missed: "#7c3aed",
+  masked: "#9ca3af" };
+const CLS_COL = { haploid: "#4b5563", doubled: "#b91c1c", missing: "#b91c1c", mixed: "#b45309", "too few": "#9ca3af" };
+const LBL = 200;
+const CELL_BY_BC = {};
+CELLS.forEach((c, i) => { CELL_BY_BC[c.bc] = c; c.idx = i; });
+for (const c of CELLS) for (const ch of c.chroms) { let a = 0; ch.pos = ch.p.map(d => (a += d)); }
+for (const e of EV) { const u = new Uint8Array(NS); for (let s = 0; s < NS; s++) u[s] = e.bits.charCodeAt(s) === 49 ? 1 : 0; e.called = u; }
+const FIRST_EV = CELLS.map(() => null);
+for (const e of EV) if (FIRST_EV[e.ci] === null) FIRST_EV[e.ci] = e.id;
+
+// ------------------------------------------------------------------ state (kept in the browser if it allows)
+const KEY = "co_review|" + D.sample + "|" + D.page_id;
+let ST = { v: {}, missed: [], mask: {}, bad: {} };
+let storageOK = true, exportedAt = null, changed = false;
+function load() {
+  try { const t = window.localStorage.getItem(KEY); if (t) { const o = JSON.parse(t); ST = Object.assign({ v: {}, missed: [], mask: {}, bad: {} }, o); } }
+  catch (err) { storageOK = false; }
+}
+function save() {
+  changed = true;
+  try { window.localStorage.setItem(KEY, JSON.stringify(ST)); storageOK = true; } catch (err) { storageOK = false; }
+}
+const U = { cell: 0, ev: null, row: 0, missed: false, xIndex: false, link: true, countAuto: true, hl: null,
+  zoomHalf: 30, sortKey: "f1", sortDir: -1, showAll: false };
+let GEO = null;
+
+// ------------------------------------------------------------------ helpers
+function lb(a, x) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < x) lo = m + 1; else hi = m; } return lo; }
+function ub(a, x) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= x) lo = m + 1; else hi = m; } return lo; }
+function esc(s) { return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
+function mb(p, d) { return (p / 1e6).toFixed(d === undefined ? 2 : d); }
+function gname(g) { return g === 1 ? "REF" : g === 0 ? "ALT" : "mixed"; }
+function dirName(e) { return gname(e.pre) + ">" + gname(e.post); }
+function maskKey(c, ch) { return c.bc + "|" + ch.c; }
+function masked(c, ch) { const k = maskKey(c, ch); return Object.prototype.hasOwnProperty.call(ST.mask, k) ? ST.mask[k] : ch.mask; }
+function isBad(c) { return !!ST.bad[c.bc]; }
+function excluded(e) { const c = CELLS[e.ci]; return isBad(c) || masked(c, c.chroms[e.ch]); }
+function needsReview(e) { return !excluded(e) && !ST.v[e.id] && !e.auto; }
+function evState(e) {
+  const c = CELLS[e.ci];
+  if (masked(c, c.chroms[e.ch])) return "masked";
+  const u = ST.v[e.id];
+  if (u === "r") return "real"; if (u === "f") return "false"; if (u === "u") return "unsure";
+  return e.auto ? "auto" : "review";
+}
+function setName(k) { const j = D.display.indexOf(k); return j >= 0 && D.dnames[j] === "current" ? D.settings[k].id + " (current)" : D.settings[k].id; }
+function prep(canvas, w, h) {
+  const r = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * r); canvas.height = Math.round(h * r);
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  const g = canvas.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); return g;
+}
+function line(g, x1, y1, x2, y2) { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
+let flashT = null;
+function flash(msg) { const f = document.getElementById("flash"); f.textContent = msg; f.classList.add("show"); clearTimeout(flashT); flashT = setTimeout(() => f.classList.remove("show"), 2600); }
+
+// x mapping of one row: Mb (each row scaled to its own length) or molecule order
+function X(ch, G) {
+  const n = ch.pos.length;
+  if (!U.xIndex) {
+    const f = p => G.x0 + (p / ch.len) * G.tw;
+    return { mol: i => f(ch.pos[i]), pos: f, posEnd: f, ev: e => f((e.st + e.en) / 2),
+      inv: x => Math.max(1, Math.min(ch.len, Math.round((x - G.x0) / G.tw * ch.len))) };
+  }
+  const fi = k => G.x0 + (k / Math.max(n, 1)) * G.tw;
+  return { mol: i => fi(i + 0.5), pos: p => fi(lb(ch.pos, p)), posEnd: p => fi(ub(ch.pos, p)), ev: e => fi(e.i),
+    inv: x => { const k = Math.max(0, Math.min(n, Math.round((x - G.x0) / G.tw * n)));
+      return k === 0 ? 1 : (k === n ? ch.len : Math.round((ch.pos[k - 1] + ch.pos[k]) / 2)); } };
+}
+
+// ------------------------------------------------------------------ the cell: one row per chromosome or piece
+function rowHeight(n) {
+  const head = document.querySelector("header").offsetHeight;
+  document.documentElement.style.setProperty("--headh", head + "px");
+  const side = document.getElementById("side"), wrap = document.getElementById("cellwrap");
+  const beside = side.offsetTop <= wrap.offsetTop + 5;          // side column next to the rows, or under them
+  const avail = window.innerHeight - head - (beside ? 26 : 330);
+  return Math.max(56, Math.min(110, Math.floor(avail / Math.max(n, 1))));
+}
+function rowLayout(h) {
+  const nl = D.display.length + (U.hl !== null ? 1 : 0);
+  const amp = Math.max(9, Math.floor((h - 16 - nl * 6 - 6) / 2));
+  return { amp, mid: 14 + amp, lane0: 14 + 2 * amp + 4 };
+}
+function drawCell() {
+  const c = CELLS[U.cell], n = c.chroms.length;
+  const W = document.getElementById("cellwrap").clientWidth;
+  const G = { W, x0: LBL, tw: W - LBL - 14 };
+  const rowH = rowHeight(n), H = n * rowH + 18;
+  const cv = document.getElementById("cv"), g = prep(cv, W, H);
+  g.clearRect(0, 0, W, H);
+  c.chroms.forEach((ch, r) => drawRow(g, c, ch, r, r * rowH, rowH, G));
+  g.fillStyle = "#6b7280"; g.font = "11px system-ui, sans-serif"; g.textAlign = "left";
+  g.fillText(U.xIndex ? "x: molecules in order (each row its own scale; i for Mb)" : "x: position, each row scaled to its own length (i for molecule order)", G.x0, H - 5);
+  if (isBad(c)) {
+    g.fillStyle = "rgba(17,24,39,0.10)"; g.fillRect(0, 0, W, H - 16);
+    g.fillStyle = "#111827"; g.font = "600 15px system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText("cell marked bad (b): none of its events are scored", W / 2, 24); g.textAlign = "left";
+  }
+  GEO = { G, rowH, n };
+}
+function labels(g, evs, y, maxX) {
+  // numbers above the event lines; the share of settings while it needs you; shifted right when they would overlap
+  let right = -1e9;
+  g.textAlign = "center";
+  for (const { e, x } of evs) {
+    const st = evState(e);
+    g.font = (e.id === U.ev ? "800 " : "600 ") + "11px system-ui, sans-serif"; g.fillStyle = COL[st];
+    const tail = st === "false" ? "✗" : "";
+    let txt = String(e.num) + (st === "review" ? " " + Math.round(100 * e.n / NS) + "%" : "") + tail;
+    let w = g.measureText(txt).width, cx = x;
+    if (cx - w / 2 < right + 3) { txt = String(e.num) + tail; w = g.measureText(txt).width; }
+    if (cx - w / 2 < right + 3) cx = right + 3 + w / 2;
+    if (maxX && cx + w / 2 > maxX) cx = maxX - w / 2;
+    g.fillText(txt, cx, y);
+    right = cx + w / 2;
+  }
+  g.textAlign = "left";
+}
+function drawRow(g, c, ch, r, top, h, G) {
+  const L = rowLayout(h), xm = X(ch, G), n = ch.pos.length, mid = top + L.mid, amp = L.amp;
+  if (r === U.row) { g.fillStyle = "#f3f6fb"; g.fillRect(0, top, G.W, h); }
+  g.strokeStyle = "#e5e7eb"; g.lineWidth = 1; line(g, 0, top + h - 0.5, G.W, top + h - 0.5);
+  g.textAlign = "left";
+  g.fillStyle = "#111827"; g.font = "600 12px system-ui, sans-serif"; g.fillText(ch.c, 8, top + 15);
+  let ly = top + 29;
+  if (ch.src) { g.fillStyle = "#6b7280"; g.font = "11px system-ui, sans-serif"; g.fillText(ch.src, 8, ly); ly += 13; }
+  g.font = "11px system-ui, sans-serif"; g.fillStyle = CLS_COL[ch.cls] || "#6b7280";
+  g.fillText(ch.cls + (ch.cov !== null ? " x" + ch.cov.toFixed(2) : "") + (ch.sw !== null ? " sw " + ch.sw.toFixed(2) : ""), 8, ly);
+  g.fillStyle = "#6b7280"; g.fillText(n + " mol", 150, top + 15);
+  g.strokeStyle = "#d1d5db"; line(g, G.x0, mid + 0.5, G.x0 + G.tw, mid + 0.5);
+  const wpx = Math.max(1, Math.min(3, (G.tw / Math.max(n, 1)) * 0.6));
+  g.lineWidth = wpx;
+  g.beginPath();
+  for (let i = 0; i < n; i++) { const s = ch.s[i] / 100; if (s > 0) { const x = Math.round(xm.mol(i)) + 0.5; g.moveTo(x, mid); g.lineTo(x, mid - amp * s); } }
+  g.strokeStyle = COL.ref; g.stroke();
+  g.beginPath();
+  for (let i = 0; i < n; i++) { const s = ch.s[i] / 100; if (s < 1) { const x = Math.round(xm.mol(i)) + 0.5; g.moveTo(x, mid); g.lineTo(x, mid + amp * (1 - s)); } }
+  g.strokeStyle = COL.alt; g.stroke();
+  g.lineWidth = 1;
+  D.display.forEach((k, j) => {
+    const y = top + L.lane0 + j * 6;
+    g.fillStyle = "#eef1f5"; g.fillRect(G.x0, y, G.tw, 4);
+    for (const b of (ch.blk[j] || [])) {
+      const xa = xm.pos(b[0]), xb = xm.posEnd(b[1]);
+      g.fillStyle = b[2] === 1 ? COL.refL : (b[2] === 0 ? COL.altL : COL.mixL);
+      g.fillRect(xa, y, Math.max(1, xb - xa), 4);
+    }
+  });
+  if (U.hl !== null) {
+    const y = top + L.lane0 + D.display.length * 6;
+    g.fillStyle = "#f5f3ff"; g.fillRect(G.x0, y, G.tw, 4);
+    g.fillStyle = COL.missed;
+    for (const id of ch.ev) { const e = EV[id]; if (e.called[U.hl]) { const x = xm.ev(e); g.fillRect(x - 2, y - 1, 4, 6); } }
+  }
+  const isM = masked(c, ch);
+  if (isM) {
+    g.fillStyle = "rgba(243,244,246,0.75)"; g.fillRect(G.x0, top + 12, G.tw, h - 13);
+    g.fillStyle = "#4b5563"; g.font = "italic 11.5px system-ui, sans-serif"; g.textAlign = "right";
+    const user = Object.prototype.hasOwnProperty.call(ST.mask, maskKey(c, ch));
+    g.fillText((user ? "masked by you" : "masked: " + ch.cls) + " - not scored (g to unmask)", G.x0 + G.tw - 4, top + 26);
+    g.textAlign = "left";
+  }
+  const evs = ch.ev.map(id => ({ e: EV[id], x: Math.round(xm.ev(EV[id])) + 0.5 })).sort((a, b) => a.x - b.x);
+  for (const { e, x } of evs) {
+    const st = evState(e), sel = e.id === U.ev;
+    if (sel) {
+      const xa = xm.pos(e.cs), xb = xm.posEnd(e.ce);
+      g.fillStyle = "rgba(249,115,22,0.13)"; g.fillRect(xa, top + 12, Math.max(2, xb - xa), h - 13);
+      g.strokeStyle = "rgba(249,115,22,0.35)"; g.lineWidth = 7; line(g, x, top + 12, x, top + h - 2);
+    }
+    g.strokeStyle = COL[st]; g.lineWidth = st === "review" ? 2.5 : 1.6;
+    if (st === "masked" || st === "unsure") g.setLineDash([3, 3]);
+    line(g, x, top + 12, x, top + h - 2); g.setLineDash([]);
+  }
+  labels(g, evs, top + 10, G.W - 2);
+  for (const m of ST.missed) {
+    if (m.bc !== c.bc || m.c !== ch.c) continue;
+    const x = Math.round(xm.pos(m.pos)) + 0.5;
+    g.strokeStyle = COL.missed; g.lineWidth = 2; g.setLineDash([5, 3]); line(g, x, top + 12, x, top + h - 2); g.setLineDash([]);
+    g.fillStyle = COL.missed; g.font = "800 11px system-ui, sans-serif"; g.textAlign = "center"; g.fillText("m", x, top + 10); g.textAlign = "left";
+  }
+  g.lineWidth = 1;
+}
+
+// ------------------------------------------------------------------ zoom on the selected event (molecule order)
+function drawZoom() {
+  const wrap = document.getElementById("zoomcol"), W = wrap.clientWidth;
+  const nl = D.baf.length + D.display.length + (U.hl !== null ? 1 : 0);
+  const mid = 64, amp = 36, H = mid + amp + 10 + nl * 12 + 22;
+  const g = prep(document.getElementById("zv"), W, H);
+  g.clearRect(0, 0, W, H);
+  if (U.ev === null) {
+    g.fillStyle = "#6b7280"; g.font = "13px system-ui, sans-serif";
+    g.fillText(CELLS[U.cell].chroms.some(ch => ch.ev.length) ? "No event selected: n jumps to the next event that needs you, or click one."
+      : "This cell has no events. Down arrow for the next cell; m to mark a crossover no setting calls.", 10, 30);
+    return;
+  }
+  const e = EV[U.ev], c = CELLS[e.ci], ch = c.chroms[e.ch], n = ch.pos.length;
+  const lo = Math.max(0, e.i - U.zoomHalf), hi = Math.min(n, e.i + U.zoomHalf), m = Math.max(hi - lo, 1);
+  const x0 = 104, tw = W - x0 - 8, bw = tw / m, xi = k => x0 + (k - lo) * bw;
+  g.fillStyle = "#111827"; g.font = "600 12px system-ui, sans-serif"; g.textAlign = "left";
+  g.fillText("event " + e.num + " on " + ch.c + ": molecules " + (lo + 1) + "-" + hi + " of " + n + " (+/- to zoom)", 4, 13);
+  // where the event could be: the gap between the surviving blocks of every setting that calls it
+  const ca = Math.max(lo, lb(ch.pos, e.cs)), cb = Math.min(hi, ub(ch.pos, e.ce));
+  if (cb > ca) { g.fillStyle = "rgba(249,115,22,0.12)"; g.fillRect(xi(ca), 18, (cb - ca) * bw, H - 40); }
+  g.strokeStyle = "#d1d5db"; g.lineWidth = 1; line(g, x0, mid + 0.5, x0 + tw, mid + 0.5);
+  for (let k = lo; k < hi; k++) {
+    const s = ch.s[k] / 100, x = xi(k) + bw * 0.15, w = Math.max(1, bw * 0.7);
+    if (s > 0) { g.fillStyle = COL.ref; g.fillRect(x, mid - amp * s, w, amp * s); }
+    if (s < 1) { g.fillStyle = COL.alt; g.fillRect(x, mid, w, amp * (1 - s)); }
+  }
+  g.fillStyle = "#6b7280"; g.font = "11px system-ui, sans-serif"; g.textAlign = "right";
+  g.fillText("REF", x0 - 6, mid - amp + 9); g.fillText("ALT", x0 - 6, mid + amp - 2);
+  let y = mid + amp + 8;
+  D.baf.forEach((b, j) => {
+    const str = ch.sm[j];
+    g.fillStyle = "#6b7280"; g.fillText("smoothed b" + b, x0 - 6, y + 8);
+    for (let k = lo; k < hi; k++) {
+      const sc = str[k], raw = ch.s[k] > 50 ? "1" : (ch.s[k] < 50 ? "0" : "m");
+      g.fillStyle = sc === "1" ? COL.refL : (sc === "0" ? COL.altL : COL.mixL);
+      g.fillRect(xi(k), y, Math.max(1, bw - 1), 9);
+      if (sc !== raw) { g.fillStyle = "#111827"; g.beginPath(); g.arc(xi(k) + bw / 2, y + 4.5, Math.min(2.5, bw / 3), 0, 6.3); g.fill(); }
+    }
+    y += 12;
+  });
+  D.display.forEach((k2, j) => {
+    g.fillStyle = "#6b7280"; g.fillText(D.dnames[j] === "current" ? "current" : D.settings[k2].id, x0 - 6, y + 8);
+    g.fillStyle = "#eef1f5"; g.fillRect(x0, y, tw, 9);
+    for (const b of (ch.blk[j] || [])) {
+      const i1 = Math.max(lo, lb(ch.pos, b[0])), i2 = Math.min(hi, ub(ch.pos, b[1]));
+      if (i2 <= i1) continue;
+      g.fillStyle = b[2] === 1 ? COL.refL : (b[2] === 0 ? COL.altL : COL.mixL);
+      g.fillRect(xi(i1), y, (i2 - i1) * bw, 9);
+    }
+    y += 12;
+  });
+  if (U.hl !== null) {
+    g.fillStyle = COL.missed; g.fillText(D.settings[U.hl].id, x0 - 6, y + 8);
+    for (const id of ch.ev) { const f = EV[id]; if (f.called[U.hl] && f.i >= lo && f.i <= hi) g.fillRect(xi(f.i) - 2, y, 4, 9); }
+    y += 12;
+  }
+  const zev = [];
+  for (const id of ch.ev) {
+    const f = EV[id]; if (f.i < lo || f.i > hi) continue;
+    const st = evState(f), x = Math.round(xi(f.i)) + 0.5;
+    g.strokeStyle = COL[st]; g.lineWidth = id === U.ev ? 2.5 : 1.5; if (st === "masked" || st === "unsure") g.setLineDash([3, 3]);
+    line(g, x, 18, x, y); g.setLineDash([]);
+    zev.push({ e: f, x });
+  }
+  labels(g, zev.sort((a, b) => a.x - b.x), 27, W - 2);
+  g.textAlign = "center";
+  for (const mm of ST.missed) {
+    if (mm.bc !== c.bc || mm.c !== ch.c) continue;
+    const k = lb(ch.pos, mm.pos); if (k < lo || k > hi) continue;
+    const x = Math.round(xi(k)) + 0.5; g.strokeStyle = COL.missed; g.setLineDash([5, 3]); line(g, x, 18, x, y); g.setLineDash([]);
+  }
+  g.fillStyle = "#6b7280"; g.font = "10.5px system-ui, sans-serif";
+  const step = Math.max(1, Math.round(m / 7));
+  for (let k = lo; k < hi; k += step) g.fillText(mb(ch.pos[k]), xi(k) + bw / 2, y + 12);
+  g.textAlign = "left"; g.fillText("Mb", 4, y + 12);
+  g.lineWidth = 1;
+}
+
+// ------------------------------------------------------------------ text panels
+function breakdown(e) {
+  const out = [];
+  for (const [key, name, fmt] of [["b", "base_af", v => v], ["mn", "marker_num", v => v], ["bs", "block", v => (v / 1e6) + " Mb"], ["t", "terminal", v => v]]) {
+    const vals = [...new Set(D.settings.map(s => s[key]))].sort((a, b) => a - b);
+    out.push("<span class='k'>" + name + "</span> " + vals.map(v => {
+      let tot = 0, hit = 0;
+      D.settings.forEach((s, k) => { if (s[key] === v) { tot++; hit += e.called[k]; } });
+      return "<span class='" + (hit === tot ? "all" : (hit === 0 ? "none" : "some")) + "'>" + fmt(v) + ": " + hit + "/" + tot + "</span>";
+    }).join(" &middot; "));
+  }
+  return out.join("<br>");
+}
+function renderInfo() {
+  const box = document.getElementById("info");
+  if (U.ev === null) { box.innerHTML = ""; return; }
+  const e = EV[U.ev], c = CELLS[e.ci], ch = c.chroms[e.ch], st = evState(e);
+  const disp = D.display.map((k, j) => (D.dnames[j] === "current" ? "current" : D.settings[k].id) + " " + (e.called[k] ? "✓" : "✗")).join(" &middot; ");
+  const vt = { review: "<b style='color:" + COL.review + "'>needs your verdict</b>", real: "<b style='color:" + COL.real + "'>real</b> (you)",
+    "false": "<b>false</b> (you)", unsure: "<b style='color:" + COL.unsure + "'>unsure</b> (you; not scored)",
+    auto: "<b style='color:" + COL.real + "'>real (auto)</b>: called by ≥" + Math.round(100 * D.rule.frac) + "% of settings with ≥" + D.rule.support +
+      " molecules at ≥" + Math.round(100 * D.rule.purity) + "% on each side; r, f or u overrides",
+    masked: "<b>masked</b> (" + esc(ch.cls) + "): not scored; g unmasks this sequence in this cell" }[st];
+  let pair = "";
+  if (e.pair >= 0) { const p = EV[e.pair]; pair = "<br><span class='k'>pair:</span> event " + p.num + " is the other edge of the same short block" +
+    (U.link ? " and gets the same verdict (l unlinks)" : " (unlinked: l links again)"); }
+  box.innerHTML =
+    "<b>Event " + e.num + "</b> &middot; " + esc(ch.c) + " &middot; " + dirName(e).replace(">", " → ") + " between " + mb(e.st) + " and " + mb(e.en) +
+    " Mb <span class='k'>(could be anywhere in " + mb(e.cs) + "-" + mb(e.ce) + " Mb, molecule " + e.i + "/" + ch.pos.length + ")</span><br>" +
+    "called by <b>" + e.n + " of " + NS + "</b> settings (" + Math.round(100 * e.n / NS) + "%) &middot; " + disp + "<br>" + breakdown(e) + "<br>" +
+    "<span class='k'>left:</span> " + e.sl + " molecules agree with " + gname(e.pre) + " (" + Math.round(100 * e.pl) + "%) &middot; " +
+    "<span class='k'>right:</span> " + e.sr + " agree with " + gname(e.post) + " (" + Math.round(100 * e.pr) + "%) " +
+    "<span class='k'>(up to the nearest event called by at least as many settings)</span><br>" +
+    "<span class='k'>verdict:</span> " + vt + pair;
+}
+function counts() {
+  let need = 0, rev = 0;
+  const per = CELLS.map(() => ({ tot: 0, need: 0, auto: 0, mask: 0, mine: 0 }));
+  for (const e of EV) {
+    const p = per[e.ci]; p.tot++;
+    if (excluded(e)) { p.mask++; continue; }
+    if (ST.v[e.id]) p.mine++;
+    if (e.auto && !ST.v[e.id]) p.auto++;
+    if (!e.auto) rev++;
+    if (needsReview(e)) { need++; p.need++; }
+  }
+  return { need, rev, per };
+}
+function renderHeader(cn) {
+  const c = CELLS[U.cell], p = cn.per[U.cell];
+  document.getElementById("title").textContent = D.sample + " crossover review";
+  document.getElementById("cellinfo").innerHTML = "cell <b>" + (U.cell + 1) + "/" + CELLS.length + "</b> " + esc(c.bc) + " &middot; " + c.mol + " molecules" +
+    (c.hap !== null ? " &middot; haploidness " + c.hap.toFixed(2) : "") + " &middot; " + c.ncur + " COs at current &middot; events " + p.tot +
+    " (" + p.need + " need you, " + p.auto + " auto, " + p.mask + " masked)";
+  document.getElementById("progress").innerHTML = "<span class='badge'>to review: " + cn.need + " of " + cn.rev + "</span>";
+  const b = [];
+  if (U.missed) b.push("<span class='badge on'>missed mode: click where a crossover is (m to stop)</span>");
+  b.push("<span class='badge'>" + (U.xIndex ? "x: molecules" : "x: Mb") + "</span>");
+  if (!U.link) b.push("<span class='badge'>pairs unlinked</span>");
+  if (!U.countAuto) b.push("<span class='badge'>auto verdicts not counted</span>");
+  b.push(storageOK ? "<span class='badge ok'>saved in this browser</span>" : "<span class='badge warn'>browser storage off: export (e) before closing</span>");
+  document.getElementById("modes").innerHTML = b.join(" ");
+}
+function renderStrip(cn) {
+  const s = document.getElementById("strip");
+  if (s.childElementCount !== CELLS.length) {
+    s.innerHTML = "";
+    CELLS.forEach((c, i) => { const sp = document.createElement("span"); sp.title = (i + 1) + " " + c.bc; sp.addEventListener("click", () => goCellIdx(i)); s.appendChild(sp); });
+  }
+  CELLS.forEach((c, i) => {
+    const p = cn.per[i];
+    let cls = isBad(c) ? "bad" : (p.tot === 0 ? "none" : (p.need === 0 ? "done" : (p.mine > 0 ? "part" : "")));
+    if (i === U.cell) cls += " cur";
+    s.children[i].className = cls;
+  });
+}
+function renderLegend() {
+  const sw = (c) => "<i style='background:" + c + "'></i>";
+  document.getElementById("legend").innerHTML =
+    sw(COL.ref) + "REF molecule (up)" + sw(COL.alt) + "ALT molecule (down)" +
+    " &nbsp;|&nbsp; lanes under each row, top to bottom: " + D.display.map((k, j) => D.dnames[j] === "current" ? "current (" + D.settings[k].id + ")" : D.settings[k].id).join(", ") +
+    " &nbsp;|&nbsp; events: " + sw(COL.review) + "needs you (% = share of settings calling it)" + sw(COL.real) + "real" + sw(COL.auto) + "auto-real" +
+    sw(COL["false"]) + "false" + sw(COL.unsure) + "unsure" + sw(COL.missed) + "missed (m)" + sw(COL.masked) + "masked";
+}
+
+// ------------------------------------------------------------------ scoreboard
+function scores() {
+  const TP = new Int32Array(NS), FP = new Int32Array(NS), FN = new Int32Array(NS), OP = new Int32Array(NS);
+  const t = { r: 0, a: 0, f: 0, u: 0, open: 0, missed: 0, bad: 0, masked: 0 };
+  for (const e of EV) {
+    if (excluded(e)) continue;
+    const u = ST.v[e.id], v = u || (e.auto && U.countAuto ? "a" : null);
+    if (v === "r" || v === "a") { t[v]++; for (let s = 0; s < NS; s++) { if (e.called[s]) TP[s]++; else FN[s]++; } }
+    else if (v === "f") { t.f++; for (let s = 0; s < NS; s++) if (e.called[s]) FP[s]++; }
+    else if (v === "u") t.u++;
+    else { t.open++; for (let s = 0; s < NS; s++) if (e.called[s]) OP[s]++; }
+  }
+  for (const m of ST.missed) {
+    const c = CELL_BY_BC[m.bc]; if (!c || isBad(c)) continue;
+    const ch = c.chroms.find(x => x.c === m.c); if (ch && masked(c, ch)) continue;
+    t.missed++; for (let s = 0; s < NS; s++) FN[s]++;
+  }
+  t.bad = CELLS.filter(isBad).length;
+  for (const c of CELLS) for (const ch of c.chroms) if (masked(c, ch)) t.masked++;
+  const rows = D.settings.map((s, k) => {
+    const p = TP[k] + FP[k] ? TP[k] / (TP[k] + FP[k]) : NaN, r = TP[k] + FN[k] ? TP[k] / (TP[k] + FN[k]) : NaN;
+    const f1 = (p + r) > 0 ? 2 * p * r / (p + r) : NaN;
+    return { k, id: s.id, cpc: s.cpc, tp: TP[k], fp: FP[k], fn: FN[k], open: OP[k], p, r, f1 };
+  });
+  return { rows, t };
+}
+function fmt3(x) { return Number.isFinite(x) ? x.toFixed(3) : "–"; }
+function renderScore() {
+  const { rows, t } = scores();
+  document.getElementById("tally").innerHTML =
+    "<b>Scored against your verdicts:</b> " + t.r + " real, " + t.f + " false, " + t.u + " unsure, " + t.missed + " missed" +
+    (U.countAuto ? " + " + t.a + " auto-real" : " (auto-real not counted: a)") + " &middot; open (no verdict): " + t.open +
+    " &middot; bad cells " + t.bad + " &middot; masked sequences " + t.masked +
+    "<br><span style='color:#6b7280'>TP real events the setting calls; FP false events it calls; FN real events (and missed crossovers) it does not; open: events it calls that have no verdict yet. Click a row to see its calls in a purple lane.</span>";
+  const key = U.sortKey, dir = U.sortDir;
+  const val = r => { const v = r[key]; return typeof v === "string" ? v : (Number.isFinite(v) ? v : -Infinity); };
+  const sorted = rows.slice().sort((a, b) => { const x = val(a), y = val(b); return x < y ? -dir : (x > y ? dir : a.k - b.k); });
+  const pins = D.display.map(k => rows[k]);
+  const rest = U.showAll ? sorted : sorted.slice(0, 15);
+  const cols = [["id", "setting"], ["cpc", "COs/cell"], ["tp", "TP"], ["fp", "FP"], ["fn", "FN"], ["open", "open"], ["p", "precision"], ["r", "recall"], ["f1", "F1"]];
+  let h = "<thead><tr>" + cols.map(([k, n]) => "<th data-k='" + k + "'>" + n + (k === key ? (dir < 0 ? " ▾" : " ▴") : "") + "</th>").join("") + "</tr></thead><tbody>";
+  const tr = (r, cls, tag) => "<tr class='" + cls + (U.hl === r.k ? " hl" : "") + "' data-s='" + r.k + "'><td>" + esc(r.id) + (tag ? " <span style='color:#92400e'>" + tag + "</span>" : "") +
+    "</td><td>" + r.cpc.toFixed(2) + "</td><td>" + r.tp + "</td><td>" + r.fp + "</td><td>" + r.fn + "</td><td>" + r.open + "</td><td>" + fmt3(r.p) + "</td><td>" + fmt3(r.r) + "</td><td><b>" + fmt3(r.f1) + "</b></td></tr>";
+  pins.forEach((r, j) => { h += tr(r, "pin", D.dnames[j] === "current" ? "current" : "shown"); });
+  const judged = t.r + t.f + t.missed > 0;
+  rest.forEach((r, j) => { h += tr(r, "", judged && j === 0 && Number.isFinite(r.f1) && key === "f1" && dir < 0 ? "best" : ""); });
+  h += "</tbody>";
+  const tb = document.getElementById("score");
+  tb.innerHTML = h + "<caption style='caption-side:bottom;text-align:left;padding-top:4px'><a href='#' id='showall'>" + (U.showAll ? "show the top 15" : "show all " + NS + " settings") + "</a></caption>";
+  tb.querySelectorAll("th").forEach(th => th.addEventListener("click", () => { const k = th.dataset.k; if (U.sortKey === k) U.sortDir = -U.sortDir; else { U.sortKey = k; U.sortDir = k === "id" ? 1 : -1; } renderScore(); }));
+  tb.querySelectorAll("tbody tr").forEach(trw => trw.addEventListener("click", () => { const k = +trw.dataset.s; U.hl = U.hl === k ? null : k; render(); }));
+  document.getElementById("showall").addEventListener("click", ev => { ev.preventDefault(); U.showAll = !U.showAll; renderScore(); });
+  // best F1 for each value of each parameter: which knob matters
+  let m = "<b>Best F1 for each value of each setting</b><table>";
+  for (const [key2, name, f] of [["b", "base_af", v => v], ["mn", "marker_num", v => v], ["bs", "block_size", v => (v / 1e6) + " Mb"], ["t", "terminal_marker_num", v => v]]) {
+    const vals = [...new Set(D.settings.map(s => s[key2]))].sort((a, b) => a - b);
+    m += "<tr><td style='color:#6b7280'>" + name + "</td>" + vals.map(v => {
+      let best = null;
+      rows.forEach(r => { if (D.settings[r.k][key2] === v && Number.isFinite(r.f1) && (!best || r.f1 > best.f1)) best = r; });
+      return "<td title='" + (best ? esc(best.id) : "") + "'>" + f(v) + ": <b>" + (best ? best.f1.toFixed(3) : "–") + "</b></td>";
+    }).join("") + "</tr>";
+  }
+  document.getElementById("marg").innerHTML = m + "</table>";
+}
+
+// ------------------------------------------------------------------ actions
+function render() {
+  const cn = counts();
+  renderHeader(cn); renderStrip(cn); drawCell(); drawZoom(); renderInfo(); renderScore();
+}
+function select(id) {
+  if (id === null || id === undefined) { U.ev = null; render(); return; }
+  const e = EV[id]; U.ev = id; U.cell = e.ci; U.row = e.ch; render();
+}
+function anchor() {
+  if (U.ev !== null) return U.ev;
+  for (let i = U.cell; i < CELLS.length; i++) if (FIRST_EV[i] !== null) return FIRST_EV[i] - 1;
+  return EV.length - 1;
+}
+function findFrom(from, dir, pred) {
+  const n = EV.length; if (!n) return null;
+  for (let k = 1; k <= n; k++) { const id = (((from + dir * k) % n) + n) % n; if (pred(EV[id])) return id; }
+  return null;
+}
+function goNeed(dir) {
+  const id = findFrom(anchor(), dir, needsReview);
+  if (id === null) { flash("nothing left to review: export with e"); return; }
+  if ((dir > 0 && id <= anchor()) || (dir < 0 && id >= anchor())) flash("wrapped around");
+  select(id);
+}
+function goAny(dir) { const id = findFrom(anchor(), dir, () => true); if (id !== null) select(id); }
+function goCellIdx(i) {
+  U.cell = Math.max(0, Math.min(CELLS.length - 1, i)); U.row = 0;
+  const ids = []; for (const ch of CELLS[U.cell].chroms) for (const id of ch.ev) ids.push(id);
+  const need = ids.filter(id => needsReview(EV[id]));
+  U.ev = need.length ? need[0] : (ids.length ? ids[0] : null);
+  if (U.ev !== null) U.row = EV[U.ev].ch;
+  render();
+}
+function goCell(dir) { goCellIdx(U.cell + dir); }
+function setVerdict(v) {
+  if (U.ev === null) { flash("no event selected"); return; }
+  const e = EV[U.ev];
+  if (excluded(e)) { flash(isBad(CELLS[e.ci]) ? "this cell is marked bad (b to unmark)" : "this sequence is masked (g to unmask)"); return; }
+  const ids = [e.id]; if (U.link && e.pair >= 0) ids.push(e.pair);
+  for (const id of ids) { if (v) ST.v[id] = v; else delete ST.v[id]; }
+  save();
+  if (v) { const nx = findFrom(e.id, 1, needsReview); if (nx !== null) { select(nx); return; } flash("that was the last one: export with e"); }
+  render();
+}
+function toggleBad() {
+  const c = CELLS[U.cell];
+  if (ST.bad[c.bc]) { delete ST.bad[c.bc]; flash("cell unmarked"); } else { ST.bad[c.bc] = true; flash("cell marked bad: its events are not scored"); }
+  save(); render();
+}
+function toggleMask() {
+  const c = CELLS[U.cell], ch = c.chroms[U.row]; if (!ch) return;
+  const k = maskKey(c, ch), now = masked(c, ch);
+  if (!now === ch.mask) delete ST.mask[k]; else ST.mask[k] = !now;
+  save(); flash(ch.c + (now ? " unmasked in this cell" : " masked in this cell")); render();
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function exportCSV() {
+  const name = { r: "real", f: "false", u: "unsure" };
+  const L = ["# co_review verdicts; sample " + D.sample + "; page " + D.page_id + "; sweep " + D.sweep + "; exported " + new Date().toISOString(),
+    "sample,type,barcode,chrom,event,start,end,direction,called_by,verdict,source"];
+  for (const e of EV) {
+    const c = CELLS[e.ci], ch = c.chroms[e.ch], u = ST.v[e.id];
+    L.push([D.sample, "event", c.bc, ch.c, e.id, e.st, e.en, dirName(e), e.n, u ? name[u] : (e.auto ? "real" : ""), u ? "user" : (e.auto ? "auto" : "")].join(","));
+  }
+  for (const m of ST.missed) L.push([D.sample, "missed", m.bc, m.c, "", m.pos, m.pos, "", 0, "real", "user"].join(","));
+  for (const c of CELLS) for (const ch of c.chroms) {
+    const user = Object.prototype.hasOwnProperty.call(ST.mask, maskKey(c, ch)), mk = masked(c, ch);
+    if (mk || user) L.push([D.sample, "mask", c.bc, ch.c, "", "", "", "", "", mk ? "masked" : "unmasked", user ? "user" : "dosage:" + ch.cls].join(","));
+  }
+  for (const bc of Object.keys(ST.bad)) if (ST.bad[bc]) L.push([D.sample, "cell", bc, "", "", "", "", "", "", "bad", "user"].join(","));
+  download("verdicts_" + D.sample + ".csv", L.join("\n") + "\n");
+  exportedAt = Date.now(); changed = false;
+  flash("verdicts_" + D.sample + ".csv downloaded");
+}
+function importCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() && l[0] !== "#");
+  if (!lines.length) { flash("empty file"); return; }
+  const hdr = lines.shift().split(","), ix = n => hdr.indexOf(n);
+  const byKey = new Map();
+  for (const e of EV) { const c = CELLS[e.ci]; byKey.set([c.bc, c.chroms[e.ch].c, e.st, e.en, dirName(e)].join("|"), e); }
+  const code = { real: "r", "false": "f", unsure: "u" };
+  let nv = 0, nm = 0, nk = 0, nb = 0, lost = 0;
+  for (const l of lines) {
+    const f = l.split(","), type = f[ix("type")], bc = f[ix("barcode")], chn = f[ix("chrom")];
+    if (type === "event") {
+      if (f[ix("source")] !== "user" || !code[f[ix("verdict")]]) continue;
+      let e = byKey.get([bc, chn, f[ix("start")], f[ix("end")], f[ix("direction")]].join("|"));
+      if (!e) {
+        const c = CELL_BY_BC[bc], mid = (+f[ix("start")] + +f[ix("end")]) / 2;
+        if (c) { const chi = c.chroms.findIndex(x => x.c === chn);
+          if (chi >= 0) { let bd = Infinity; for (const id of c.chroms[chi].ev) { const g = EV[id]; if (dirName(g) === f[ix("direction")] && mid >= g.cs && mid <= g.ce) { const d = Math.abs(mid - (g.st + g.en) / 2); if (d < bd) { bd = d; e = g; } } } } }
+      }
+      if (e) { ST.v[e.id] = code[f[ix("verdict")]]; nv++; } else lost++;
+    } else if (type === "missed") {
+      const pos = +f[ix("start")];
+      if (CELL_BY_BC[bc] && !ST.missed.some(m => m.bc === bc && m.c === chn && m.pos === pos)) { ST.missed.push({ bc, c: chn, pos }); nm++; }
+    } else if (type === "mask" && f[ix("source")] === "user") { ST.mask[bc + "|" + chn] = f[ix("verdict")] === "masked"; nk++; }
+    else if (type === "cell" && f[ix("verdict")] === "bad") { if (CELL_BY_BC[bc]) { ST.bad[bc] = true; nb++; } }
+  }
+  save(); render();
+  flash("imported " + nv + " verdicts, " + nm + " missed, " + nk + " masks, " + nb + " bad cells" + (lost ? "; " + lost + " verdicts matched no event here" : ""));
+}
+function helpHTML() {
+  const k = (a, b) => "<tr><td><kbd>" + a + "</kbd></td><td>" + b + "</td></tr>";
+  return "<h3>Keys</h3><table>" +
+    k("r", "real crossover (then jumps to the next event that needs you)") + k("f", "false: noise, mapping artefact, or not a switch") +
+    k("u", "unsure (not scored)") + k("x", "clear the verdict (auto events go back to auto)") +
+    k("n / p", "next / previous event that needs you (across cells)") + k("→ / ←", "next / previous event, any") +
+    k("↓ / ↑", "next / previous cell") + k("b", "bad cell: none of its events are scored (doublet, contamination, mixed everywhere)") +
+    k("g", "mask / unmask the selected row's sequence in this cell (doubled, missing or mixed copies)") +
+    k("m", "missed mode: click on a row where a crossover is that no setting calls; click its mark again to remove") +
+    k("i", "x axis: Mb or molecule order") + k("+ / -", "zoom panel: fewer / more molecules") +
+    k("a", "count auto-real events in the scoreboard, or only your own verdicts") + k("l", "link / unlink the two edges of one short block") +
+    k("e", "export verdicts_" + esc(D.sample) + ".csv (every event, your verdicts, missed crossovers, masks, bad cells)") + k("h / Esc", "this help") +
+    "</table><h3>What you see</h3><p>Each row is one sequence of the reference (" + (CELLS[0] && CELLS[0].chroms.some(c => c.src) ? "pieces: name, then where the piece comes from" : "chromosomes") +
+    "), with its dosage class in this cell (haploid, doubled, missing, mixed, too few; x = molecules over the expected number, sw = share of neighbouring molecules that switch allele). " +
+    "Molecules: red up = REF allele, blue down = ALT; a molecule with both alleles is split by its share. The lanes under the molecules are hapCO's final blocks at the shown settings (pink REF, blue ALT). " +
+    "An <b>event</b> is one switch called by one or more of the " + NS + " settings of the sweep (" + esc(D.sweep) + "); the number above it is its number in this cell and, while it needs you, the share of settings that call it. " +
+    "Selected: the orange band is where the switch could be (between the surviving blocks). The zoom panel shows the molecules around it, what smoothing makes of them at each base_af (a black dot = smoothing overwrote that molecule), and the blocks.</p>" +
+    "<p><b>Auto-real</b>: called by ≥" + Math.round(100 * D.rule.frac) + "% of settings with ≥" + D.rule.support + " molecules at ≥" + Math.round(100 * D.rule.purity) +
+    "% purity on each side. <b>Masked</b> by default: sequences classed " + esc(D.mask_classes.join(", ")) + " in a cell. Neither needs a key; override when wrong.</p>" +
+    "<p>Verdicts are kept in this browser for this page (page " + esc(D.page_id) + ") if it allows; export to keep them for good, or to move to another machine (import). " +
+    "Page built " + esc(D.built) + " from repo " + esc(D.commit) + "; " + CELLS.length + " cells shown of " + D.n_called + " hapCO calls (" + D.n_good + " selected).</p>";
+}
+function toggleHelp() { const h = document.getElementById("help"); if (h.hidden) { h.innerHTML = helpHTML(); h.hidden = false; } else h.hidden = true; }
+
+document.addEventListener("keydown", ev => {
+  const t = ev.target; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  let ok = true;
+  switch (ev.key) {
+    case "r": setVerdict("r"); break; case "f": setVerdict("f"); break; case "u": setVerdict("u"); break; case "x": setVerdict(null); break;
+    case "n": goNeed(1); break; case "p": goNeed(-1); break;
+    case "ArrowRight": goAny(1); break; case "ArrowLeft": goAny(-1); break;
+    case "ArrowDown": goCell(1); break; case "ArrowUp": goCell(-1); break;
+    case "b": toggleBad(); break; case "g": toggleMask(); break;
+    case "m": U.missed = !U.missed; render(); break; case "i": U.xIndex = !U.xIndex; render(); break;
+    case "a": U.countAuto = !U.countAuto; render(); break; case "l": U.link = !U.link; render(); break;
+    case "+": case "=": U.zoomHalf = Math.max(6, Math.round(U.zoomHalf / 1.5)); render(); break;
+    case "-": case "_": U.zoomHalf = Math.min(400, Math.round(U.zoomHalf * 1.5)); render(); break;
+    case "e": exportCSV(); break; case "h": case "?": toggleHelp(); break;
+    case "Escape": document.getElementById("help").hidden = true; if (U.missed) { U.missed = false; render(); } break;
+    default: ok = false;
+  }
+  if (ok) ev.preventDefault();
+});
+document.getElementById("cv").addEventListener("click", ev => {
+  if (!GEO) return;
+  const rect = ev.currentTarget.getBoundingClientRect(), x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+  const c = CELLS[U.cell], r = Math.floor(y / GEO.rowH);
+  if (r < 0 || r >= c.chroms.length) return;
+  const ch = c.chroms[r], xm = X(ch, GEO.G);
+  U.row = r;
+  if (U.missed && x >= GEO.G.x0) {
+    const hit = ST.missed.findIndex(m => m.bc === c.bc && m.c === ch.c && Math.abs(xm.pos(m.pos) - x) <= 6);
+    if (hit >= 0) { ST.missed.splice(hit, 1); save(); flash("missed crossover removed"); render(); return; }
+    const pos = xm.inv(x);
+    const near = ch.ev.map(id => EV[id]).filter(e => pos >= e.cs && pos <= e.ce);
+    if (near.length) { select(near[0].id); flash("event " + near[0].num + " already covers this spot: give it a verdict instead"); return; }
+    ST.missed.push({ bc: c.bc, c: ch.c, pos }); save(); flash("missed crossover at " + mb(pos) + " Mb (click it again to remove)"); render(); return;
+  }
+  let best = null, bd = 10;
+  for (const id of ch.ev) { const d = Math.abs(xm.ev(EV[id]) - x); if (d < bd) { bd = d; best = id; } }
+  if (best !== null) select(best); else render();
+});
+document.getElementById("bexp").addEventListener("click", exportCSV);
+document.getElementById("bhelp").addEventListener("click", toggleHelp);
+document.getElementById("fimp").addEventListener("change", ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  const rd = new FileReader(); rd.onload = () => importCSV(String(rd.result)); rd.readAsText(f); ev.target.value = "";
+});
+window.addEventListener("resize", () => render());
+window.addEventListener("beforeunload", ev => { if (!storageOK && changed) { ev.preventDefault(); ev.returnValue = ""; } });
+
+load();
+renderLegend();
+const first = findFrom(-1, 1, needsReview);
+if (first !== null) select(first); else goCellIdx(0);
+</script>
+</body>
+</html>
