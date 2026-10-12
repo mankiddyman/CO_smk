@@ -682,3 +682,39 @@ New conda env: workflow/envs/karyoploter.yaml. Bioconductor packages
 
 Rule: composite_landscape, ~1-2 min runtime per sample, single PDF
 output: results/composite/{sample}/composite.pdf.
+
+---
+
+## 2026-10-12 — D. paradoxa crossover calling: marker_num 6, terminal 4, dosage masks
+
+**Decision:** `co_calling.Drosera_paradoxa`: marker_num 4 -> 6 and terminal_marker_num 8 -> 4
+(base_af 0.3 and block_size 2 Mb kept), and `mask_classes: [doubled, missing, mixed]`: a new rule,
+co_masks, classes every cell x chromosome (or piece) by dosage (calling_overview.py's classes), and
+co_aggregate drops the calls of masked pairs; the landscape scripts then count, per chromosome, only
+the cells that count for it.
+
+**Evidence:** the 100-cell review of Dparadoxa_split on review_page.py (co_sweep.py: hapCO in Python,
+identical to the R on every cell; 498 events from 120 settings, every one judged by eye or
+auto-accepted). Verdicts, events and settings in docs/co_review/; workflow/scripts/score_verdicts.py
+reproduces the scores: F1 0.990 (95% 0.980-0.998 with the cells resampled; TP 299, FP 3, FN 3)
+against 0.884 (0.850-0.917; 268 / 36 / 34) for marker_num 4 / terminal 8.
+
+**Reasoning:**
+- terminal 8 missed 32 real crossovers 4-7 molecules from an end; paradoxa is sparse (~1 molecule per
+  2.4 Mb), so that is typically 20-35 Mb of chromosome, not a tip.
+- marker_num 4 kept interior blocks of 4-5 molecules, false whenever judged (43 of 43), on loci that
+  misbehave in other cells too.
+- Ends may be laxer than the interior: one crossover makes a short end block; a short interior block
+  needs two crossovers close together, which interference makes rare.
+- 9 nuclei carry X twice (allele interleaving there reads as crossovers: 17 of the 25 X calls at the
+  new settings); 4 carry chr5 twice; 10 cell x piece are mixed.
+
+**Status:** Dparadoxa_split rerun from co_calling (workflow/slurm/Dparadoxa_split_recall.sbatch).
+Dparadoxa_std, _CB and _hap1 take the same block when rerun, but there X is not a sequence of its own,
+so whole-chromosome dosage classes will not catch a doubled X: their masks need the pieces' classes
+translated to their coordinates first. D. binata: review page built (60 cells), not reviewed;
+mask_classes [] until then.
+
+**Also seen:** chr5_hap1 from ~290 Mb to its end reads as the other haplotype in every cell (44
+molecules in 44 cells, 97-100% against the cell's own genotype): a phase switch in the hap1 assembly
+there, not biology (a crossover flips at most half the cells). To be checked with Hi-C.

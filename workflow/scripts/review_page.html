@@ -279,7 +279,7 @@ function drawRow(g, c, ch, r, top, h, G) {
 function drawZoom() {
   const wrap = document.getElementById("zoomcol"), W = wrap.clientWidth;
   const nl = D.baf.length + D.display.length + (U.hl !== null ? 1 : 0);
-  const mid = 64, amp = 36, H = mid + amp + 10 + nl * 12 + 22;
+  const mid = 64, amp = 36, H = mid + amp + 11 + nl * 12 + 22;
   const g = prep(document.getElementById("zv"), W, H);
   g.clearRect(0, 0, W, H);
   if (U.ev === null) {
@@ -302,9 +302,18 @@ function drawZoom() {
     if (s > 0) { g.fillStyle = COL.ref; g.fillRect(x, mid - amp * s, w, amp * s); }
     if (s < 1) { g.fillStyle = COL.alt; g.fillRect(x, mid, w, amp * (1 - s)); }
   }
+  // molecules of one locus (<= 20 kb apart, one gene usually) joined by a bracket under the bars
+  g.strokeStyle = "#111827"; g.lineWidth = 2;
+  for (let k = lo; k < hi - 1; ) {
+    let j = k;
+    while (j + 1 < hi && ch.pos[j + 1] - ch.pos[j] <= 20000) j++;
+    if (j > k) { const yb = mid + amp + 3; line(g, xi(k) + bw * 0.15, yb, xi(j) + bw * 0.85, yb); }
+    k = j + 1;
+  }
+  g.lineWidth = 1;
   g.fillStyle = "#6b7280"; g.font = "11px system-ui, sans-serif"; g.textAlign = "right";
   g.fillText("REF", x0 - 6, mid - amp + 9); g.fillText("ALT", x0 - 6, mid + amp - 2);
-  let y = mid + amp + 8;
+  let y = mid + amp + 9;
   D.baf.forEach((b, j) => {
     const str = ch.sm[j];
     g.fillStyle = "#6b7280"; g.fillText("smoothed b" + b, x0 - 6, y + 8);
@@ -384,8 +393,8 @@ function renderInfo() {
     "<b>Event " + e.num + "</b> &middot; " + esc(ch.c) + " &middot; " + dirName(e).replace(">", " → ") + " between " + mb(e.st) + " and " + mb(e.en) +
     " Mb <span class='k'>(could be anywhere in " + mb(e.cs) + "-" + mb(e.ce) + " Mb, molecule " + e.i + "/" + ch.pos.length + ")</span><br>" +
     "called by <b>" + e.n + " of " + NS + "</b> settings (" + Math.round(100 * e.n / NS) + "%) &middot; " + disp + "<br>" + breakdown(e) + "<br>" +
-    "<span class='k'>left:</span> " + e.sl + " molecules agree with " + gname(e.pre) + " (" + Math.round(100 * e.pl) + "%) &middot; " +
-    "<span class='k'>right:</span> " + e.sr + " agree with " + gname(e.post) + " (" + Math.round(100 * e.pr) + "%) " +
+    "<span class='k'>left:</span> " + e.sl + " molecules" + (e.ll !== undefined ? " at <b>" + e.ll + (e.ll === 1 ? " locus" : " loci") + "</b>" : "") + " agree with " + gname(e.pre) + " (" + Math.round(100 * e.pl) + "%) &middot; " +
+    "<span class='k'>right:</span> " + e.sr + " molecules" + (e.lr !== undefined ? " at <b>" + e.lr + (e.lr === 1 ? " locus" : " loci") + "</b>" : "") + " agree with " + gname(e.post) + " (" + Math.round(100 * e.pr) + "%) " +
     "<span class='k'>(up to the nearest event called by at least as many settings)</span><br>" +
     "<span class='k'>verdict:</span> " + vt + pair;
 }
@@ -627,7 +636,7 @@ function helpHTML() {
     "), with its dosage class in this cell (haploid, doubled, missing, mixed, too few; x = molecules over the expected number, sw = share of neighbouring molecules that switch allele). " +
     "Molecules: red up = REF allele, blue down = ALT; a molecule with both alleles is split by its share. The lanes under the molecules are hapCO's final blocks at the shown settings (pink REF, blue ALT). " +
     "An <b>event</b> is one switch called by one or more of the " + NS + " settings of the sweep (" + esc(D.sweep) + "); the number above it is its number in this cell and, while it needs you, the share of settings that call it. " +
-    "Selected: the orange band is where the switch could be (between the surviving blocks). The zoom panel shows the molecules around it, what smoothing makes of them at each base_af (a black dot = smoothing overwrote that molecule), and the blocks.</p>" +
+    "Selected: the orange band is where the switch could be (between the surviving blocks). The zoom panel shows the molecules around it (a black bracket under them joins molecules of one locus: no more than 20 kb apart, one gene usually, so not independent evidence), what smoothing makes of them at each base_af (a black dot = smoothing overwrote that molecule), and the blocks. The text under it counts molecules and loci on each side.</p>" +
     "<p><b>Auto-real</b>: called by ≥" + Math.round(100 * D.rule.frac) + "% of settings with ≥" + D.rule.support + " molecules at ≥" + Math.round(100 * D.rule.purity) +
     "% purity on each side. <b>Masked</b> by default: sequences classed " + esc(D.mask_classes.join(", ")) + " in a cell. Neither needs a key; override when wrong.</p>" +
     "<p>Verdicts are kept in this browser for this page (page " + esc(D.page_id) + ") if it allows; export to keep them for good, or to move to another machine (import). " +

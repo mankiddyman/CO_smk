@@ -9,6 +9,10 @@
 #   --co_per_cell    results/crossovers/{sample}/co_per_cell.tsv
 #   --chrom_map      results/cell_data/{sample}/chrom_map.tsv
 #   --out_dir        results/landscape/{sample}/
+#   --masks          results/crossovers/{sample}/masks.tsv (optional): cell x chromosome pairs masked for
+#                    dosage (a nucleus with the sequence twice, not at all, or mixed). Their calls are
+#                    already gone from co_intervals (co_aggregate.R); here each chromosome's rate, CO
+#                    classes and CoC use only the cells that count for it.
 #
 # Outputs:
 #   01_landscape.pdf
@@ -45,7 +49,9 @@ option_list <- list(
   make_option("--coc_interval_mb", type = "double", default = 5,
               help = "Target interval size for CoC binning [default: %default]"),
   make_option("--n_boot",       type = "integer", default = 500,
-              help = "Bootstrap iterations [default: %default]")
+              help = "Bootstrap iterations [default: %default]"),
+  make_option("--masks",        type = "character", default = NULL,
+              help = "masks.tsv from co_masks.py [optional]")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 dir.create(opt$out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -71,9 +77,31 @@ load_data <- function(opt) {
   chrom_map$name <- as.character(chrom_map$name)
   chrom_map$size <- as.numeric(chrom_map$size)
 
+  # Masked cell x chromosome pairs: that cell does not count for that chromosome
+  masked <- list()
+  if (!is.null(opt$masks)) {
+    m <- read.table(opt$masks, sep = "\t", header = TRUE, colClasses = "character")
+    m <- m[m$masked == "yes" & m$barcode %in% cells$barcode, ]
+    for (c in chrom_map$name) masked[[c]] <- m$barcode[m$chrom == c]
+  }
+  n_cells <- length(unique(cells$barcode))
+  n_chrom <- sapply(chrom_map$name, function(c) n_cells - length(masked[[c]]))
+  names(n_chrom) <- chrom_map$name
+
   list(co = co, cells = cells, chrom_map = chrom_map,
-       n_cells = length(unique(cells$barcode)))
+       n_cells = n_cells, n_chrom = n_chrom, masked = masked)
 }
+
+# Cells that count for a chromosome (all of them unless masks were given), and genome totals built from
+# per-chromosome rates (equal to the plain totals when nothing is masked)
+nc          <- function(d, chrom) d$n_chrom[[chrom]]
+scored      <- function(d, chrom) setdiff(d$cells$barcode, d$masked[[chrom]])
+n_masked    <- function(d) sum(d$n_cells - d$n_chrom)
+genome_cM   <- function(d) sum(sapply(d$chrom_map$name, function(c) sum(d$co$chrom == c) * 100 / nc(d, c)))
+genome_mean <- function(d) sum(sapply(d$chrom_map$name, function(c) sum(d$co$chrom == c) / nc(d, c)))
+mask_note   <- function(d) if (n_masked(d) > 0)
+  sprintf("\n%d cell x chromosome masked for dosage (twice / absent / mixed): each chromosome's rate uses the cells that count for it",
+          n_masked(d)) else ""
 
 # =============================================================================
 # PLOT 1: PER-CHROMOSOME RECOMBINATION LANDSCAPE (cM/Mb per bin)
@@ -103,24 +131,25 @@ plot_landscape <- function(d, out_path, bin_mb,
                            win_mb = 5, step_mb = 0.5, n_boot = 200) {
   suppressPackageStartupMessages(library(ggplot2))
 
-  total_cM      <- nrow(d$co) * 100 / d$n_cells
+  total_cM      <- genome_cM(d)
   total_size_Mb <- sum(d$chrom_map$size) / 1e6
   genome_rate   <- total_cM / total_size_Mb
 
   # Build long-format data: per chromosome, per window
   build_chrom_df <- function(chrom, chrom_size, cos_chrom) {
-    real <- compute_sliding_rate(cos_chrom$mid, chrom_size, d$n_cells,
+    real <- compute_sliding_rate(cos_chrom$mid, chrom_size, nc(d, chrom),
                                  win_mb, step_mb)
+    pool <- scored(d, chrom)
     boot_rates <- matrix(NA, nrow = n_boot, ncol = length(real$centres))
     for (b in seq_len(n_boot)) {
-      boot_bcs <- sample(d$cells$barcode, replace = TRUE)
+      boot_bcs <- sample(pool, replace = TRUE)
       boot_co  <- cos_chrom[cos_chrom$barcode %in% boot_bcs, ]
-      br <- compute_sliding_rate(boot_co$mid, chrom_size, d$n_cells,
+      br <- compute_sliding_rate(boot_co$mid, chrom_size, nc(d, chrom),
                                  win_mb, step_mb)
       boot_rates[b, ] <- br$rates
     }
     sd_rate <- apply(boot_rates, 2, sd, na.rm = TRUE)
-    chr_avg <- nrow(cos_chrom) * 100 / d$n_cells / (chrom_size / 1e6)
+    chr_avg <- nrow(cos_chrom) * 100 / nc(d, chrom) / (chrom_size / 1e6)
 
     data.frame(
       chrom       = chrom,
@@ -148,7 +177,7 @@ plot_landscape <- function(d, out_path, bin_mb,
     chr_avg    = sapply(d$chrom_map$name, function(c) {
       n <- sum(d$co$chrom == c)
       sz <- d$chrom_map$size[d$chrom_map$name == c]
-      n * 100 / d$n_cells / (sz / 1e6)
+      n * 100 / nc(d, c) / (sz / 1e6)
     }),
     chrom_end  = d$chrom_map$size / 1e6
   )
@@ -189,16 +218,17 @@ plot_landscape <- function(d, out_path, bin_mb,
         paste0(
           "n = %d pollen cells, %d crossovers (mean %.2f / cell)\n",
           "Expected from CO assurance: ~%.1f / cell (1 CO per bivalent x %d bivalents x 0.5 chromatid)\n",
-          "Genome-wide mean rate: %.2f cM/Mb (%.0f cM total over %.0f Mb assembled)"
+          "Genome-wide mean rate: %.2f cM/Mb (%.0f cM total over %.0f Mb assembled)%s"
         ),
         d$n_cells,
         nrow(d$co),
-        nrow(d$co) / d$n_cells,
+        genome_mean(d),
         0.5 * nrow(d$chrom_map),
         nrow(d$chrom_map),
         genome_rate,
-        nrow(d$co) * 100 / d$n_cells,
-        sum(d$chrom_map$size) / 1e6
+        total_cM,
+        sum(d$chrom_map$size) / 1e6,
+        mask_note(d)
       )
     ) + theme_classic(base_size = 9) +
     theme(
@@ -246,8 +276,8 @@ plot_marey <- function(d, out_path) {
     data.frame(
       chrom  = chrom,
       pos_Mb = c(0, cos_chrom$mid / 1e6, chrom_size / 1e6),
-      cum_cM = c(0, seq_along(cos_chrom$mid) * 100 / d$n_cells,
-                 nrow(cos_chrom) * 100 / d$n_cells)
+      cum_cM = c(0, seq_along(cos_chrom$mid) * 100 / nc(d, chrom),
+                 nrow(cos_chrom) * 100 / nc(d, chrom))
     )
   }))
   marey_df$chrom <- factor(marey_df$chrom, levels = d$chrom_map$name)
@@ -257,7 +287,7 @@ plot_marey <- function(d, out_path) {
     chrom      <- d$chrom_map$name[i]
     chrom_size <- d$chrom_map$size[i]
     n_cos      <- sum(d$co$chrom == chrom)
-    total_cM   <- n_cos * 100 / d$n_cells
+    total_cM   <- n_cos * 100 / nc(d, chrom)
     data.frame(
       chrom        = chrom,
       chrom_end_Mb = chrom_size / 1e6,
@@ -267,7 +297,7 @@ plot_marey <- function(d, out_path) {
   }))
   ref_df$chrom <- factor(ref_df$chrom, levels = d$chrom_map$name)
 
-  total_cM_genome <- nrow(d$co) * 100 / d$n_cells
+  total_cM_genome <- genome_cM(d)
   total_size_Mb   <- sum(d$chrom_map$size) / 1e6
   genome_rate     <- total_cM_genome / total_size_Mb
 
@@ -292,10 +322,10 @@ plot_marey <- function(d, out_path) {
         paste0(
           "n = %d pollen cells, %d crossovers\n",
           "Total genetic length: %.0f cM over %.0f Mb (mean %.2f cM/Mb)\n",
-          "Each step is one observed CO; slope = local recombination rate"
+          "Each step is one observed CO; slope = local recombination rate%s"
         ),
         d$n_cells, nrow(d$co),
-        total_cM_genome, total_size_Mb, genome_rate
+        total_cM_genome, total_size_Mb, genome_rate, mask_note(d)
       )
     ) +
     theme_classic(base_size = 10) +
@@ -336,7 +366,7 @@ plot_co_classes <- function(d, out_path) {
   class_levels <- c("0", "1", "2", "3", "4+")
 
   long_df <- do.call(rbind, lapply(chrom_names, function(c) {
-    counts      <- co_matrix[, c]
+    counts      <- co_matrix[scored(d, c), c]
     capped      <- pmin(counts, max_class)
     tab         <- tabulate(capped + 1, nbins = max_class + 1)
     props       <- tab / sum(tab)
@@ -358,7 +388,7 @@ plot_co_classes <- function(d, out_path) {
   ann_df <- do.call(rbind, lapply(chrom_names, function(c) {
     chr_size_Mb <- d$chrom_map$size[d$chrom_map$name == c] / 1e6
     n           <- sum(d$co$chrom == c)
-    chr_mean    <- n / d$n_cells
+    chr_mean    <- n / nc(d, c)
     data.frame(chrom         = c,
                chrom_size_Mb = chr_size_Mb,
                label         = sprintf("%.0f Mb\nmean %.2f", chr_size_Mb, chr_mean))
@@ -396,9 +426,9 @@ plot_co_classes <- function(d, out_path) {
       subtitle = sprintf(
         paste0(
           "n = %d pollen cells, %d total crossovers (mean %.2f / cell)\n",
-          "Bar height = chromosome size; segment height = proportion x size"
+          "Bar height = chromosome size; segment height = proportion x size%s"
         ),
-        d$n_cells, nrow(d$co), nrow(d$co) / d$n_cells
+        d$n_cells, nrow(d$co), genome_mean(d), mask_note(d)
       )
     ) +
     theme_classic(base_size = 10) +
@@ -433,19 +463,22 @@ compute_coc <- function(d, interval_mb, n_boot) {
       chr_co   <- co_subset[co_subset$chrom == chr, ]
       if (nrow(chr_co) == 0) next
       breaks <- seq(0, chr_size, length.out = N + 1)
-      mat <- matrix(0, nrow = n_cells, ncol = N)
+      ids <- scored(d, chr)                      # the cells that count for this chromosome
+      idx <- seq_along(ids); names(idx) <- ids
+      n_c <- length(ids)
+      mat <- matrix(0, nrow = n_c, ncol = N)
       for (i in seq_len(nrow(chr_co))) {
         bc <- chr_co$barcode[i]
-        if (!bc %in% cell_ids) next
+        if (!bc %in% ids) next
         iv <- findInterval(chr_co$mid[i], breaks)
-        if (iv >= 1 && iv <= N) mat[cell_index[[bc]], iv] <- 1
+        if (iv >= 1 && iv <= N) mat[idx[[bc]], iv] <- 1
       }
-      P <- colSums(mat) / n_cells
+      P <- colSums(mat) / n_c
       iv_size_Mb <- (chr_size / N) / 1e6
       for (a in 1:(N - 1)) {
         for (b in (a + 1):N) {
           obs <- sum(mat[, a] * mat[, b])
-          exp <- P[a] * P[b] * n_cells
+          exp <- P[a] * P[b] * n_c
           if (exp > 0) {
             ds <- c(ds, (b - a) * iv_size_Mb)
             os <- c(os, obs)
@@ -694,11 +727,12 @@ write_landscape_summary <- function(d, out_path) {
                                 function(c) sum(d$co$chrom == c)),
     total_genetic_cM   = sapply(d$chrom_map$name,
                                 function(c) sum(d$co$chrom == c) * 100 /
-                                            d$n_cells),
+                                            nc(d, c)),
     mean_cos_per_cell  = sapply(d$chrom_map$name,
-                                function(c) sum(d$co$chrom == c) / d$n_cells)
+                                function(c) sum(d$co$chrom == c) / nc(d, c))
   )
   out$cM_per_Mb <- out$total_genetic_cM / out$size_Mb
+  out$n_cells   <- as.integer(d$n_chrom[d$chrom_map$name])   # cells that count for the chromosome
   write.table(out, out_path, sep = "\t", quote = FALSE, row.names = FALSE)
 }
 
@@ -720,8 +754,8 @@ write_gamma_summary <- function(g, out_path) {
 
 cat("Loading data...\n")
 d <- load_data(opt)
-cat(sprintf("  %d cells, %d COs, %d chromosomes\n",
-            d$n_cells, nrow(d$co), nrow(d$chrom_map)))
+cat(sprintf("  %d cells, %d COs, %d chromosomes; %d cell x chromosome masked\n",
+            d$n_cells, nrow(d$co), nrow(d$chrom_map), n_masked(d)))
 
 cat("Plot 1: landscape...\n")
 plot_landscape(d, file.path(opt$out_dir, "01_landscape.pdf"), opt$bin_mb)

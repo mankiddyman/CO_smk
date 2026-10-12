@@ -6,7 +6,9 @@ What it does (run from the CO_smk directory, after co_sweep.py):
      or ALT->REF) whose possible positions overlap are one event (at most one call per setting; a call whose
      range touches two events joins the nearer). Each event knows which settings call it.
   2. Measures each event: how many molecules on each side agree with the genotype it switches between, up to
-     the nearest event called by at least as many settings ("left 23 molecules, 96% REF").
+     the nearest event called by at least as many settings, and at how many loci ("left 23 molecules at 9
+     loci, 96% REF"). A locus: molecules no more than 20 kb apart (one gene, usually); molecules of one locus
+     are not independent evidence.
   3. Triage. AUTO (pre-marked real, can be overridden): called by >= --auto_frac of the settings with >=
      --auto_support molecules at >= --auto_purity on each side. REVIEW: everything else. MASKED: the event's
      sequence is doubled, missing or mixed in that cell (--mask_classes; classes as calling_overview.py:
@@ -242,6 +244,18 @@ def agrees(g, s):
     return s > 0.5 if g == 1 else (s < 0.5 if g == 0 else 0.25 <= s <= 0.75)
 
 
+LOCUS_GAP = 20000                                    # molecules <= 20 kb apart: one locus (one gene, usually)
+
+
+def n_loci(ps):
+    n, last = 0, None
+    for p in ps:
+        if last is None or p - last > LOCUS_GAP:
+            n += 1
+        last = p
+    return n
+
+
 def measure(ev, pos, shr):
     n = len(pos)
     for e in ev:
@@ -255,6 +269,7 @@ def measure(ev, pos, shr):
             seg = [s for s in shr[a:b] if s != 0.5]
             m = sum(1 for s in seg if agrees(g, s))
             e["s" + side], e["p" + side] = m, (m / len(seg) if seg else 0.0)
+            e["l" + side] = n_loci([pos[j] for j in range(a, b) if shr[j] != 0.5 and agrees(g, shr[j])])
         e["auto"] = (len(e["set"]) / NS >= A.auto_frac and min(e["sl"], e["sr"]) >= A.auto_support
                      and min(e["pl"], e["pr"]) >= A.auto_purity)
     ev.sort(key=lambda e: (e["i"], e["st"]))
@@ -333,11 +348,11 @@ for e in EVENTS:
     bits = "".join("1" if k in e["set"] else "0" for k in range(NS))
     ev_out.append(dict(id=e["id"], ci=e["ci"], ch=e["ch"], num=e["num"], st=e["st"], en=e["en"], cs=e["cs"],
                        ce=e["ce"], pre=e["pre"], post=e["post"], n=len(e["set"]), bits=bits, sl=e["sl"], sr=e["sr"],
-                       pl=round(e["pl"], 3), pr=round(e["pr"], 3), auto=bool(e["auto"]),
+                       pl=round(e["pl"], 3), pr=round(e["pr"], 3), ll=e["ll"], lr=e["lr"], auto=bool(e["auto"]),
                        pair=e["pair"]["id"] if e["pair"] is not None else -1, i=e["i"]))
 GN = {1: "REF", 0: "ALT", -1: "mixed"}
 tsv = ["event\tbarcode\tchrom\tstart\tend\tcstart\tcend\tdirection\tn_settings\tfraction\ttriage\tleft_molecules\t"
-       "right_molecules\tleft_purity\tright_purity\tpair\tsettings"]
+       "right_molecules\tleft_purity\tright_purity\tpair\tsettings\tleft_loci\tright_loci"]
 for e in ev_out:
     c = CELLS_OUT[e["ci"]]
     ch = c["chroms"][e["ch"]]
@@ -345,7 +360,7 @@ for e in ev_out:
     tsv.append("\t".join(map(str, [e["id"], c["bc"], ch["c"], e["st"], e["en"], e["cs"], e["ce"],
                                    GN.get(e["pre"], "?") + ">" + GN.get(e["post"], "?"), e["n"],
                                    "%.3f" % (e["n"] / NS), tri, e["sl"], e["sr"], e["pl"], e["pr"],
-                                   e["pair"] if e["pair"] >= 0 else "", e["bits"]])))
+                                   e["pair"] if e["pair"] >= 0 else "", e["bits"], e["ll"], e["lr"]])))
 body = "\n".join(tsv) + "\n"
 with gzip.open(os.path.join(OUT, "events.tsv.gz"), "wt") as fo:
     fo.write(body)

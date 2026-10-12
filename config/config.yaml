@@ -603,6 +603,7 @@ cell_qc:
 # Stage 3d — CO calling (sliding-block)
 co_calling:
   Drosera_binata:
+    mask_classes: []   # none until binata's review (qc/co_review/Dbinata_hap1): every cell counts everywhere, as before
     terminal_marker_num: 8
     # 2 x marker_num. hapCO dropped every block shorter than block_size,
     # including a chromosome's first and last, so crossovers within 2 Mb of
@@ -655,9 +656,32 @@ co_calling:
 
   Drosera_paradoxa:
     input_rows: molecules
-    terminal_marker_num: 8   # 2 x marker_num: end blocks need 8 molecules, no minimum length
-    _approved: "PROVISIONAL 2026-09-28 | molecule input mn4 on the 50-cell panel; qc/review/Dparadoxa_hap1/support"
-    # PROVISIONAL 2026-09-28: molecule input (informative markers, one row per
+    terminal_marker_num: 4   # end blocks need 4 molecules, no minimum length (8 until 2026-10-12)
+    _approved: "2026-10-12 | 100-cell review of Dparadoxa_split, all 120 sweep settings scored against it: F1 0.990 vs 0.884 for mn 4 / terminal 8; docs/co_review/Dparadoxa_split_*, score_verdicts.py"
+    mask_classes: [doubled, missing, mixed]   # rule co_masks: calls on these cell x sequence pairs are dropped
+    # 2026-10-12: chosen on Dparadoxa_split (pieces, no translocation joins) with co_sweep.py (hapCO in
+    # Python, identical to the R on every cell) and review_page.py: 100 cells, 498 events, each judged by
+    # eye or auto-accepted (called by >= 90% of settings, >= 8 molecules at >= 80% on each side). Verdicts,
+    # events and settings in docs/co_review/; score_verdicts.py Dparadoxa_split (302 real, 127 false;
+    # unsure and masked sequences left out; 95% interval with the cells resampled):
+    #                        TP   FP   FN  precision  recall  F1
+    #   mn 4, terminal 8    268   36   34    0.882    0.887   0.884 (0.850-0.917)   until 2026-10-12
+    #   mn 6, terminal 4    299    3    3    0.990    0.990   0.990 (0.980-0.998)   now
+    # terminal_marker_num 8 -> 4: 32 real crossovers lie 4-7 molecules from a sequence end (at ~1 molecule
+    #   per 2.4 Mb that is typically 20-35 Mb of chromosome); terminal 8 missed them. At mn 6, F1 by
+    #   terminal: 4 0.990, 5 0.982, 6 0.969, 7 0.957, 8 0.939, 12 0.890 -- each step up loses 6-10 real
+    #   crossovers and removes at most 2 false ones.
+    # marker_num 4 -> 6: interior blocks of 4-5 molecules were false whenever judged (43 of 43); they sit
+    #   on loci where other cells' molecules disagree twice as often as next to clean crossovers (median 7%
+    #   vs 3%). At terminal 4, F1 by marker_num: 3 0.859, 4 0.930, 5 0.976, 6 0.990, 7 0.987, 8 0.983.
+    # Ends may be laxer than the interior: one crossover near an end leaves a short end block, while a
+    #   short interior block needs two crossovers close together, which interference makes rare.
+    # base_af 0.2 (best 0.983) vs 0.3 (0.990); block_size 1-5 Mb no difference: kept 0.3 and 2 Mb.
+    # Weak spot: terminal_marker_num counts molecules, not genes; a few accepted end blocks rest on one
+    #   or two genes.
+    # mask_classes: 23 of 900 cell x piece in Dparadoxa_split (X twice in 9 nuclei, chr5 twice in 4,
+    #   10 mixed); at mn 6 / terminal 4 they carry 31 of 337 calls, 17 of them on X.
+    # Before (PROVISIONAL 2026-09-28): molecule input (informative markers, one row per
     # molecule), chosen on the 50-cell review panel with block_support.py:
     #                    COs/cell  islands  UNSUPPORTED islands        missed ends
     #   markers, mn 23     4.38     1.58    0.58 (0.42 REF-in-ALT)       0.46
@@ -670,7 +694,7 @@ co_calling:
     # unmappable and chr4_hap1 0-85.5 Mb (on chr3_hap2 in hap2) is unhandled.
     cell_markers: 200
     block_size: 2000000
-    marker_num: 4   # MOLECULES per block (input_rows: molecules)
+    marker_num: 6   # MOLECULES per block (input_rows: molecules); 4 until 2026-10-12
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
@@ -687,6 +711,7 @@ co_calling:
 
   _template:
     input_rows: markers   # or molecules: one row per molecule, informative markers only
+    mask_classes: []   # dosage classes (rule co_masks) whose calls are dropped: doubled, missing, mixed, too few
     terminal_marker_num: 0   # >0: end blocks need this many markers, no min length
     # !! marker QC flags gaps against marker_filters.gap_flag_bp, not this block_size -- re-check marker gaps against the chosen block_size before stamping
     # TEMPLATE -- never read by param_for(). Copy it when adding a species
@@ -726,6 +751,7 @@ co_calling:
 
   Cuscuta_epithymum:
     input_rows: markers   # as it ran
+    mask_classes: []   # as it ran: no dosage masks
     terminal_marker_num: 0   # off -- as it ran
     _approved: "PINNED 2026-09-21 | co_calling_params.txt 2500/2e6/23; smoothing not passed then, so hapCO's defaults (script unchanged since b23f23b, 2026-04-29)"
     base_af: 0.3   # hapCO default, not passed in May
@@ -739,6 +765,7 @@ co_calling:
 
   Spondias_tuberosa:
     input_rows: markers   # as it ran
+    mask_classes: []   # as it ran: no dosage masks
     terminal_marker_num: 0   # off -- as it ran
     _approved: "PINNED 2026-09-21 | recorded co_calling params 2026-08-06: 800/1e6/4/0.3/0.4/0.2"
     base_af: 0.3

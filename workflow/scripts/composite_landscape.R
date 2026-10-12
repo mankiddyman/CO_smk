@@ -9,6 +9,8 @@
 #   - 5 heatmap tracks below hap1: CO rate, gene density, SNP density,
 #     satellite density, LTR density
 #   - hap2 ideogram (no tracks)
+# --masks (optional, results/crossovers/{sample}/masks.tsv): cell x chromosome pairs masked for dosage;
+# the CO rate track of each chromosome then uses only the cells that count for it.
 # =============================================================================
 
 options(stringsAsFactors = FALSE)
@@ -37,7 +39,9 @@ option_list <- list(
   make_option("--step_mb",      type = "double", default = 0.5),
   make_option("--hap2_fai",     type = "character", default = NULL),
   make_option("--hap2_chroms",  type = "character",
-              default = "scaffold_2,scaffold_4,scaffold_6,scaffold_8,scaffold_10,scaffold_12,scaffold_14")
+              default = "scaffold_2,scaffold_4,scaffold_6,scaffold_8,scaffold_10,scaffold_12,scaffold_14"),
+  make_option("--masks",        type = "character", default = NULL,
+              help = "masks.tsv from co_masks.py [optional]")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -100,8 +104,15 @@ load_data <- function(opt) {
   chrom_map$name <- as.character(chrom_map$name)
   chrom_map$size <- as.numeric(chrom_map$size)
 
+  n_cells <- length(unique(cells$barcode))
+  n_chrom <- setNames(rep(n_cells, nrow(chrom_map)), chrom_map$name)
+  if (!is.null(opt$masks)) {
+    m <- read.table(opt$masks, sep = "\t", header = TRUE, colClasses = "character")
+    m <- m[m$masked == "yes" & m$barcode %in% cells$barcode, ]
+    for (c in chrom_map$name) n_chrom[[c]] <- n_cells - sum(m$chrom == c)
+  }
   list(co = co, cells = cells, chrom_map = chrom_map,
-       n_cells = length(unique(cells$barcode)))
+       n_cells = n_cells, n_chrom = n_chrom)
 }
 
 # =============================================================================
@@ -236,7 +247,7 @@ build_co_track_data <- function(d, win_mb, step_mb) {
     chrom      <- d$chrom_map$name[i]
     chrom_size <- d$chrom_map$size[i]
     cos_chrom  <- d$co[d$co$chrom == chrom, ]
-    sr <- compute_sliding_rate(cos_chrom$mid, chrom_size, d$n_cells,
+    sr <- compute_sliding_rate(cos_chrom$mid, chrom_size, d$n_chrom[[chrom]],
                                win_mb, step_mb)
     data.frame(chrom = chrom, pos = sr$centres, val = sr$rates)
   })
@@ -485,8 +496,9 @@ plot.window(xlim = c(0, 1), ylim = c(0, 1), xaxs = "i", yaxs = "i")
 
 # Title in the top margin (NDC overlay so karyoploteR cannot push it around)
 text(0.5, 0.985,
-     sprintf("Composite landscape - %s   (n=%d cells, %d COs)",
-             sid, d$n_cells, nrow(d$co)),
+     sprintf("Composite landscape - %s   (n=%d cells, %d COs%s)",
+             sid, d$n_cells, nrow(d$co),
+             if (any(d$n_chrom < d$n_cells)) sprintf("; %d cell x chromosome masked", sum(d$n_cells - d$n_chrom)) else ""),
      cex = 1.0, font = 2, adj = c(0.5, 0.5), xpd = NA)
 
 # Stack 5 colorbars + ribbon legend vertically along the right side
