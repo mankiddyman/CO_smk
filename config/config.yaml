@@ -603,14 +603,46 @@ cell_qc:
 # Stage 3d — CO calling (sliding-block)
 co_calling:
   Drosera_binata:
-    mask_classes: []   # none until binata's review (qc/co_review/Dbinata_hap1): every cell counts everywhere, as before
-    terminal_marker_num: 8
-    # 2 x marker_num. hapCO dropped every block shorter than block_size,
-    # including a chromosome's first and last, so crossovers within 2 Mb of
+    mask_classes: [doubled, missing, mixed]   # rule co_masks: calls on these cell x chromosome pairs are dropped ([] until 2026-10-12)
+    terminal_marker_num: 4   # end blocks need 4 molecules, no minimum length (8 until 2026-10-12)
+    _approved: "2026-10-12 | 60-cell review of Dbinata_hap1 (976 events) plus a second look; every sweep setting re-called without chr6_hap1:1-70000 and scored: F1 0.989 vs 0.949 for mn 4 / bs 2 Mb / terminal 8; docs/co_review/Dbinata_hap1_*, score_verdicts.py --recall_all --exclude"
+    # 2026-10-12: chosen on Dbinata_hap1 with co_sweep.py (hapCO in Python, identical to the R) and review_page.py:
+    # 60 cells, 976 events; 608 auto-accepted (called by >= 90% of settings, >= 8 molecules at >= 80% on each
+    # side), the rest judged by eye; then a second look changed 45 verdicts (listed at the top of
+    # docs/co_review/Dbinata_hap1_verdicts.csv; the upload is kept beside it as _verdicts_uploaded.csv).
+    # Molecules in config/exclude_regions/Dbinata_hap1.csv are dropped before calling (rule
+    # cell_data_molecules): chr6_hap1:1-70000 follows chr6 35.0-35.5 Mb in 58 of 58 cells and painted false
+    # end blocks at the chr6 start (17 events). Scores: score_verdicts.py Dbinata_hap1 --recall_all --exclude
+    # config/exclude_regions/Dbinata_hap1.csv (863 real, 89 false; unsure and masked left out; 95% interval
+    # with the 60 reviewed cells resampled):
+    #                                 TP   FP   FN  precision  recall  F1
+    #   mn 4, bs 2 Mb, terminal 8    797   19   66    0.977    0.924   0.949 (0.934-0.964)   until 2026-10-12
+    #   mn 8, bs 1 Mb, terminal 4    852    8   11    0.991    0.987   0.989 (0.982-0.995)   now
+    # Against the verdicts as uploaded (the page's own calls, chr6 start included) the same pick is the best
+    # of the 120: F1 0.986 vs 0.963.
+    # block_size 2 -> 1 Mb: +20 real close doubles (blocks of 1.5-5 Mb with 14-34 molecules), no false one.
+    #   F1 by block_size: 0.5 0.989 (+4 unreviewed calls), 1 0.989, 1.5 0.986, 2 0.977, 3 0.963, 5 0.934.
+    # marker_num 4 -> 8: short interior blocks on mixed or sticky genes go; at 6: +7 real, +12 false.
+    #   F1 by marker_num: 4 0.977, 5 0.981, 6 0.986, 7 0.986, 8 0.989, 10 0.988, 12 0.988.
+    # terminal_marker_num 8 -> 4: judged-real crossovers per molecule step from a chromosome end are flat (14
+    #   per step from 8 to 40 molecules in), so end blocks of 4-7 molecules are crossovers too; terminal 8
+    #   missed 43 (and avoided 7 false). F1 by terminal: 3 0.989 (+16 unreviewed 3-molecule ends), 4 0.989,
+    #   5 0.988, 6 0.984, 8 0.967, 12 0.933.
+    # mask_classes as paradoxa; among the 60 cells only 'mixed' occurred (3 chromosomes, masked on the page too).
+    # The objection to 1 Mb below (COs/cell climbing without limit) was with marker input and mn 4; with
+    #   molecules and mn 8 it is 14.5 calls per reviewed cell.
+    # Open: cell ATGCGAAGTTACACGT switches 0.11-0.24 on every chromosome (median cell 0.07) and has 26 calls
+    #   (median 14.5), a mixed nucleus? About a dozen interior genes disagree with the molecules around them in
+    #   > 20% of cells (chr3_hap1 48.32 Mb: 59-62% agreement in 32 cells); one gene cannot make a call at mn 8 /
+    #   1 Mb, but it can nudge a breakpoint. hapCO's fine breakpoint ignores direction: 13 of
+    #   889 calls on these cells sit on an opposite-direction split, 6 of them >= 0.5 Mb off.
+    #   marker_filters.gap_flag_bp is still 2 Mb (marker QC not rerun at 1 Mb).
+    # Before (2026-09-28 .. 2026-10-12): terminal_marker_num 8 = 2 x marker_num. hapCO dropped every block
+    # shorter than block_size, including a chromosome's first and last, so crossovers within 2 Mb of
     # an end vanished -- and binata's ends are its gene- and marker-richest
     # regions (2026-09-25). End blocks need MOLECULES only (8, double the
     # interior 4, since they give up the length rule); interior unchanged.
-    _approved: "2026-09-28 | molecule input scored on the 50-cell review panel; qc/review/Dbinata_hap1/support"
+    # _approved was "2026-09-28 | molecule input scored on the 50-cell review panel; qc/review/Dbinata_hap1/support"
     input_rows: molecules
     # One row per molecule, informative markers only (rule cell_data_molecules),
     # so marker_num below counts MOLECULES. Scored on the review panel with
@@ -629,8 +661,8 @@ co_calling:
     cell_markers: 200
     # A floor only: cells are chosen upstream by haploidness, and this must
     # not silently drop any of the 1,260.
-    block_size: 2000000
-    marker_num: 4   # MOLECULES per block (input_rows: molecules)
+    block_size: 1000000   # 2000000 until 2026-10-12
+    marker_num: 8   # MOLECULES per block (input_rows: molecules); 4 until 2026-10-12
     base_af: 0.3
     window_af: 0.4
     genotype: 0.2
@@ -644,7 +676,7 @@ co_calling:
     #   COs/cell              ~6.5 / ~8.7 / 10.51 / 12.75 / ~13.9
     #   chromosomes < 0.5       12 /   10 /     6 /     1 /     1
     #   close-double share    flat, ~0.20-0.23 at every value
-    # block_size 1 Mb REJECTED: COs/cell climbed without limit even in the
+    # block_size 1 Mb REJECTED (2026-09, marker input): COs/cell climbed without limit even in the
     # cleanest cells (18 -> 37) and close doubles rose 0.30 -> 0.42.
     # Noise check at matched depth (COs/cell by haploidness tier within a depth
     # tertile), marker_num 8: shallow cells 12.35 / 12.61 / 12.80 from the
@@ -665,8 +697,10 @@ co_calling:
     # events and settings in docs/co_review/; score_verdicts.py Dparadoxa_split (302 real, 127 false;
     # unsure and masked sequences left out; 95% interval with the cells resampled):
     #                        TP   FP   FN  precision  recall  F1
-    #   mn 4, terminal 8    268   36   34    0.882    0.887   0.884 (0.850-0.917)   until 2026-10-12
-    #   mn 6, terminal 4    299    3    3    0.990    0.990   0.990 (0.980-0.998)   now
+    #   mn 4, terminal 8    268   36   34    0.882    0.887   0.884 (0.848-0.916)   until 2026-10-12
+    #   mn 6, terminal 4    299    3    3    0.990    0.990   0.990 (0.981-0.998)   now
+    # (intervals: the 99 reviewed cells with an event resampled, as score_verdicts.py does since the binata
+    #  stamp; 0.850-0.917 and 0.980-0.998 with the 100 page cells)
     # terminal_marker_num 8 -> 4: 32 real crossovers lie 4-7 molecules from a sequence end (at ~1 molecule
     #   per 2.4 Mb that is typically 20-35 Mb of chromosome); terminal 8 missed them. At mn 6, F1 by
     #   terminal: 4 0.990, 5 0.982, 6 0.969, 7 0.957, 8 0.939, 12 0.890 -- each step up loses 6-10 real

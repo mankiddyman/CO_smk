@@ -718,3 +718,45 @@ mask_classes [] until then.
 **Also seen:** chr5_hap1 from ~290 Mb to its end reads as the other haplotype in every cell (44
 molecules in 44 cells, 97-100% against the cell's own genotype): a phase switch in the hap1 assembly
 there, not biology (a crossover flips at most half the cells). To be checked with Hi-C.
+
+## 2026-10-12 — D. binata crossover calling: marker_num 8, block_size 1 Mb, terminal 4, chr6_hap1:1-70000 out
+
+**Decision:** `co_calling.Drosera_binata`: marker_num 4 -> 8, block_size 2 -> 1 Mb, terminal_marker_num
+8 -> 4 (base_af 0.3 kept), `mask_classes: [doubled, missing, mixed]` (as paradoxa). Molecules in
+`config/exclude_regions/Dbinata_hap1.csv` (chr6_hap1:1-70000) are dropped from the hapCO input
+(molecule_tables.py --exclude in rule cell_data_molecules; samples without such a file are untouched).
+
+**Evidence:** the 60-cell review of Dbinata_hap1 (page cab5de9813; 976 events from 120 settings, 608
+auto-accepted, the rest judged by eye), then a second look that changed 45 verdicts, each listed at the
+top of docs/co_review/Dbinata_hap1_verdicts.csv (the upload kept as _verdicts_uploaded.csv).
+`score_verdicts.py Dbinata_hap1 --recall_all --exclude config/exclude_regions/Dbinata_hap1.csv`
+re-calls every setting without that region: F1 0.989 (95% 0.982-0.995 with the 60 cells resampled; TP
+852, FP 8, FN 11) against 0.949 (0.934-0.964; 797 / 19 / 66) for marker_num 4 / 2 Mb / terminal 8.
+Against the verdicts as uploaded (the page's calls, region included) the same setting is the best of the
+120 too: 0.986 against 0.963.
+
+**Reasoning:**
+- chr6_hap1:1-70000 behaves as if it sat at the far end of chr6: in all 58 cells with molecules there its
+  allele is the cell's chr6 genotype at 35.0-35.5 Mb, and its neighbours' only 45-53% of the time. With
+  1-9 molecules per cell it made a false end block at the chr6 start in cells with an odd number of chr6
+  crossovers (17 events). A scaffolding/orientation error or a collapsed duplicate in hap1. Of 688 end
+  loci tested against the molecules further in, the few others that disagree carry 1-2 molecules per
+  cell or have other genes between them and the end: none can make an end block on its own.
+- End blocks of 4-7 molecules are crossovers: judged-real crossovers per molecule step from an end are
+  flat (14 per step from 8 to 40 molecules in), which predicts ~56 at 4-7; 55 events sit there. The 28
+  judged unsure with >= 2 clean genes were set to real; terminal 8 missed 43 real ones.
+- block_size 1 Mb adds 20 real close doubles (blocks of 1.5-5 Mb, 14-34 molecules) and no false one.
+  The September objection to 1 Mb (calls climbing without limit) was with marker input and mn 4.
+- marker_num 8 drops short interior blocks on mixed or sticky genes (at 6: +7 real, +12 false).
+
+**Changed with it:** score_verdicts.py: --recall_all, --exclude, --verdicts; crossovers per cell, re-calls
+and the interval now over the reviewed cells (those with an event), not every cell of the sweep (the
+paradoxa intervals in config move by 0.001-0.002; its F1s are unchanged).
+
+**Status:** Dbinata_hap1 rerun from cell_data_molecules (workflow/slurm/Dbinata_hap1_recall.sbatch), with
+co_sweep.py --check afterwards. Open: cell ATGCGAAGTTACACGT switches 0.11-0.24 on every chromosome
+(median cell 0.07) with 26 calls (median 14.5), a mixed nucleus?; about a dozen interior genes disagree
+with the molecules around them in > 20% of cells (chr3_hap1 48.32 Mb: 59-62% agreement in 32 cells; where
+they belong is not clear), one gene too few to make a call at these settings but enough to nudge a
+breakpoint; hapCO's fine breakpoint ignores direction (13 of 889 calls on an opposite-direction split, 6
+of them >= 0.5 Mb off); marker gaps not re-checked at 1 Mb (gap_flag_bp still 2 Mb).

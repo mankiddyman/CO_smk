@@ -1,0 +1,10 @@
+# Molecules in these regions of Dbinata_hap1 are left out of crossover calling (molecule_tables.py --exclude,
+# rule cell_data_molecules; score_verdicts.py --exclude applies the same rule). start/end 1-based, inclusive.
+# chr6_hap1:1-70000 -- its sequence behaves as if it sat at the far end of chr6: in all 58 cells of the binata
+#   review (2026-10-12) with molecules there, their allele is the cell's chr6 genotype at 35.0-35.5 Mb, and the
+#   cell's own chr6 genotype next to it only 45-53% of the time (chance). With 1-9 molecules per cell it made
+#   a false end block at chr6 0.24-2.06 Mb in cells with an odd number of chr6 crossovers (17 events judged).
+#   Molecules there span 8.4-64.6 kb; the next ones are at 180 kb. A scaffolding/orientation error or a
+#   collapsed duplicate in hap1; see docs/decisions.md 2026-10-12.
+chrom,start,end,reason
+chr6_hap1,1,70000,allele follows chr6_hap1 35.0-35.5 Mb in 58 of 58 cells (binata review 2026-10-12)

@@ -1107,11 +1107,17 @@ rule cell_data_molecules:
     nearly every cell painted false blocks of that allele (binata review
     panel, 2026-09-28: pipeline 3.96 unsupported islands per cell, one-sided
     REF-in-ALT; molecule input 0.00). Written for the selected cells only; the
-    full per-marker tables in results/cell_data stay for diagnostics."""
+    full per-marker tables in results/cell_data stay for diagnostics.
+    If config/exclude_regions/{sample}.csv exists, molecules in its regions are
+    dropped: stretches of this reference whose alleles follow another place in
+    the genome (Dbinata_hap1 chr6_hap1:1-70000, 2026-10-12). Samples without
+    the file are untouched -- no input, no params, nothing reruns."""
     input:
         good_cells = "results/cell_qc/{sample}/good_cells.tsv",
         classes = "qc/markers/{sample}/marker_classes.tsv.gz",
         chrom_map = "results/cell_data/{sample}/chrom_map.tsv",
+        exclude = lambda w: ([f"config/exclude_regions/{w.sample}.csv"]
+                             if os.path.exists(f"config/exclude_regions/{w.sample}.csv") else []),
     output:
         done = "results/cell_data_mol/{sample}/.done",
     log: "logs/cell_data_molecules/{sample}.log"
@@ -1123,7 +1129,7 @@ rule cell_data_molecules:
         """
         mkdir -p "$(dirname {log})"
         python workflow/scripts/molecule_tables.py {wildcards.sample} {input.good_cells} \
-            results/cell_data_mol/{wildcards.sample} > {log} 2>&1
+            results/cell_data_mol/{wildcards.sample} --exclude "{input.exclude}" > {log} 2>&1
         touch {output.done}
         """
 
