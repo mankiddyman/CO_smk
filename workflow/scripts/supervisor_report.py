@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""supervisor_report.py -- D. binata and D. paradoxa crossover landscapes, start to finish.
+"""supervisor_report.py -- D. binata and D. paradoxa crossover landscapes, start to finish (version 5).
 
 One self-contained HTML page for the supervisor, plus one PDF per species with every nucleus's
 crossover plot. Every number, table and figure is computed here from the pipeline's own outputs
@@ -7,23 +7,31 @@ crossover plot. Every number, table and figure is computed here from the pipelin
 that state a number build it from the computed value. A section that cannot be built is shown
 in red with the error instead of stopping the report.
 
-  0 summary  1 material  2 pipeline at a glance  3 markers  4 cells  5 crossovers
-  6 landscapes  7 is each reference right?  8 limitations  9 next steps  appendix
+  0 summary  1 material  2 pipeline at a glance  3 markers  4 cells  5 crossover calling: settings from the
+  review  6 landscapes  7 is each reference right? (pollen co-segregation, Hi-C, flags)  8 limitations
+  9 next steps  appendix
 
 Usage (from the CO_smk root):
-  supervisor_report.py [--binata Dbinata_hap1] [--paradoxa Dparadoxa_std] [--out reports/supervisor]
-                       [--no_cell_pdfs]
+  supervisor_report.py [--binata Dbinata_hap1] [--paradoxa Dparadoxa_split] [--out reports/supervisor_v5]
+                       [--previous reports/supervisor_CB/report.html,...] [--no_cell_pdfs]
 Writes OUT/report.html, OUT/cells_<sample>.pdf, OUT/fig/*.png and OUT/numbers.txt.
 
-D. paradoxa references: Dparadoxa_std (A + D, chr1/chr2 joined as assembled) or Dparadoxa_CB (C + B, joined as the
-pollen inherit them). Crossovers near joins the pollen do not support (ARTEFACT_JOINS) are shown with and without;
-on CB they are kept and only counted against the chromosome's average. All text names the arms of the reference used.
+Sequences and chromosomes. A crossover reference can be cut into pieces (results/reference/<sample>/pieces.tsv;
+Dparadoxa_split is Dparadoxa_CB cut at its three translocation breakpoints, so no join between translocated
+pieces is assumed). Pieces are the units of crossover calling, dosage masks and the pollen co-segregation test;
+landscapes, interference and the one-crossover-per-chromosome checks use the chromosomes the pieces were cut
+from (positions mapped back, cut points drawn). Without pieces.tsv both are the reference's n longest sequences.
+Settings: from the review of the calls (docs/co_review/<sample>_{events.tsv.gz,settings.tsv,verdicts.csv}) and its
+scores (qc/co_review/<sample>/scores.tsv and scores.txt from score_verdicts.py).
+Version 4 (Dparadoxa_std / Dparadoxa_CB, the chr1/chr2 joins, rDNA at the joins) is not repeated; section 7
+points to it (--previous).
 """
 import argparse
 import base64
+import collections
 import csv
 import datetime
-import glob
+import gzip
 import html
 import math
 import os
@@ -32,6 +40,7 @@ import shlex
 import shutil
 import subprocess
 import traceback
+import zlib
 
 import numpy as np
 import pandas as pd
@@ -39,14 +48,15 @@ import yaml
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
+from matplotlib.colors import LinearSegmentedColormap
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--binata", default="Dbinata_hap1")
-ap.add_argument("--paradoxa", default="Dparadoxa_std")
-ap.add_argument("--out", default="reports/supervisor")
+ap.add_argument("--paradoxa", default="Dparadoxa_split")
+ap.add_argument("--out", default="reports/supervisor_v5")
 ap.add_argument("--refs_root", default="/netscratch/dep_mercier/grp_marques/Aaryan/refs")
 ap.add_argument("--phd_root", default="/netscratch/dep_mercier/grp_marques/Aaryan/reproducible_phd")
+ap.add_argument("--previous", default="reports/supervisor_CB/report.html,reports/supervisor/report.html")
 ap.add_argument("--no_cell_pdfs", action="store_true")
 A = ap.parse_args()
 OUT, FIG = A.out, os.path.join(A.out, "fig")
@@ -54,28 +64,20 @@ os.makedirs(FIG, exist_ok=True)
 SPP = [("binata", A.binata), ("paradoxa", A.paradoxa)]
 COL = {"binata": "#0F6E56", "paradoxa": "#534AB7"}
 NAME = {"binata": "D. binata", "paradoxa": "D. paradoxa"}
-ARM = {"L1": "#5DCAA5", "L2": "#F0997B", "P": "#AFA9EC", "Q": "#FAC775"}
-# translocation joins on the paradoxa crossover references, as in paradoxa_cb_check.py
-JOINS = {"Dparadoxa_std": [("A join L1|P", "chr1_hap1", 262.9), ("D join L2|Q", "chr2_hap2", 215.0)],
-         "Dparadoxa_CB": [("C join L1|Q", "chr1_hap2", 262.0), ("B join L2|P", "chr2_hap1", 211.0)]}
-ARMSPAN = {"chr1_hap1": (262.9, "L1", "P"), "chr2_hap2": (215.0, "L2", "Q"),   # A, D: the joins of JOINS
-           "chr1_hap2": (262.0, "L1", "Q"), "chr2_hap1": (211.0, "L2", "P")}   # C, B
-ARMNAME = {"chr1_hap1": "A", "chr1_hap2": "C", "chr2_hap1": "B", "chr2_hap2": "D"}
-PAIRS_FILE = "qc/linkage/Dparadoxa_std/pollen_pairs_check.txt"   # the conflict is measured on A + D
-# References whose chr1/chr2 joins the pollen do NOT support (linkage r ~ 0.5 across them): crossovers within 10 Mb
-# of these joins are an artefact and are shown with and without. On Dparadoxa_CB the joins are as the pollen inherit
-# them, so crossovers there are kept and only counted against the chromosome's average.
-ARTEFACT_JOINS = {"Dparadoxa_std"}
+CMAP = {sp: LinearSegmentedColormap.from_list("phi_" + sp, ["#FFFFFF", c]) for sp, c in COL.items()}
+for _cm in CMAP.values():
+    _cm.set_bad("#E9E7E0")
+# windows of WIN_MB per reference sequence; a nucleus's genotype in a window needs MIN_MOL molecules, >= GT_MAJ of
+# them one allele. Pollen co-segregation: phi between two windows over the nuclei that have both (>= PHI_N), against
+# NPERM shuffles. Near-identical nuclei: >= DUP_AGREE of >= DUP_MIN windows called in both agree; NSHUF_DUP shuffles.
+WIN_MB, MIN_MOL, GT_MAJ, BINS, NBOOT, NPERM, PHI_N = 10, 3, 0.8, 20, 500, 200, 20
+DUP_AGREE, DUP_MIN, NSHUF_DUP = 0.95, 20, 500
+USED, MISSING, NUM, PROBLEMS, WARN = [], [], {}, [], []
+def stream(*key):
+    """A random stream of its own for each analysis and species, so changing one leaves the others as they were."""
+    return np.random.default_rng([1] + [zlib.crc32(str(k).encode()) for k in key])
 
 
-def join_names(S):
-    """('chr1_hap2 and chr2_hap1', 'C and B', 'Q and P') for the reference's two chr1/chr2 joins."""
-    js = JOINS.get(S, [])
-    return (" and ".join(c for _, c, _ in js), " and ".join(ARMNAME.get(c, c) for _, c, _ in js),
-            " and ".join(ARMSPAN[c][2] for _, c, _ in js if c in ARMSPAN))
-WIN_MB, MIN_MOL, BINS, NBOOT = 10, 3, 20, 500
-USED, MISSING, NUM, PROBLEMS = [], [], {}, []
-rng = np.random.default_rng(1)
 plt.rcParams.update({"font.size": 9, "axes.spines.top": False, "axes.spines.right": False})
 
 
@@ -88,8 +90,21 @@ def have(p):
     return False
 
 
+def have_opt(p):
+    """An optional input: listed as read when there, not as missing when absent."""
+    if p and os.path.exists(p):
+        USED.append(p)
+        return True
+    return False
+
+
 def natural(c):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", c)]
+
+
+def short(c):
+    """chr4_hap1 -> chr4"""
+    return re.sub(r"_hap\d+", "", c)
 
 
 def put(sp, key, val):
@@ -102,10 +117,18 @@ def ok(x):
 
 
 def fi(x):
-    return "{:,}".format(int(round(x))) if ok(x) and not (isinstance(x, float) and math.isinf(x)) else "–"
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "–"
+    return "{:,}".format(int(round(x))) if ok(x) and not math.isinf(x) else "–"
 
 
 def ff(x, d=1):
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "–"
     return "%.*f" % (d, x) if ok(x) else "–"
 
 
@@ -123,11 +146,6 @@ def lines_of(p):
     return v[1:] if v and not re.match(r"^[ACGTN]+(-\d+)?$", v[0]) else v
 
 
-def tool(name):
-    c = sorted(glob.glob(".snakemake/conda/*/bin/%s" % name))
-    return os.path.abspath(c[0]) if c else shutil.which(name)
-
-
 def fai_lens(p):
     return {l.split("\t")[0]: int(l.split("\t")[1]) for l in open(p) if l.strip()}
 
@@ -141,12 +159,29 @@ def guarded(name, fn):
         return None
 
 
-def poisson_tail(k, mu):
-    """P(X >= k), X ~ Poisson(mu), in log space."""
+def poisson_logtail(k, mu):
+    """log P(X >= k), X ~ Poisson(mu): the upper terms summed in log space (no 1 - CDF cancellation, no
+    underflow); stops once the terms fall 30 log units below the sum."""
     if k <= 0:
-        return 1.0
-    s = sum(math.exp(-mu + i * math.log(mu) - math.lgamma(i + 1)) for i in range(int(k)))
-    return max(0.0, 1.0 - s)
+        return 0.0
+    if mu <= 0:
+        return float("-inf")
+    i = int(k)
+    ls = -mu + i * math.log(mu) - math.lgamma(i + 1)
+    while True:
+        i += 1
+        lt = -mu + i * math.log(mu) - math.lgamma(i + 1)
+        ls = max(ls, lt) + math.log1p(math.exp(-abs(ls - lt)))
+        if i > mu and lt < ls - 30:
+            return min(0.0, ls)
+
+
+def p_txt(lp):
+    """A p-value from its natural log, readable at any size: 3.1e-05, 2e-180."""
+    if lp >= math.log(1e-300):
+        return "%.1e" % math.exp(lp)
+    e = lp / math.log(10)
+    return "%.1fe%d" % (10 ** (e - math.floor(e)), math.floor(e))
 
 
 def uidx(v):
@@ -155,7 +190,7 @@ def uidx(v):
     return (o / 0.2) / (i / 0.6) if i > 0 else float("inf")
 
 
-def profile(C):
+def profile(C, rng):
     """Relative-position profile and ends-vs-middle ratio, bootstrapped over cells (rows of C)."""
     v = C.sum(0)
     prof, us = [], []
@@ -167,19 +202,27 @@ def profile(C):
                 U=uidx(v), U_lo=np.percentile(us, 2.5), U_hi=np.percentile(us, 97.5))
 
 
+def fg(x):
+    """A ratio with as many decimals as it needs: 0.83, 12.4, 178."""
+    if not ok(x) or math.isinf(float(x)):
+        return "–"
+    x = float(x)
+    return "%.0f" % x if abs(x) >= 100 else ("%.1f" % x if abs(x) >= 10 else "%.2f" % x)
+
+
 def shape(U, lo, hi):
     if not ok(U):
         return "–"
     if math.isinf(U):
         return "U-shaped: no crossovers in the middle 60%"
-    ci = "95%% CI %s–%s" % (ff(lo, 2), ff(hi, 2))
+    ci = "95%% CI %s–%s" % (fg(lo), fg(hi))
     if lo > 1.5:
-        return "U-shaped: ends %s× the middle (%s)" % (ff(U), ci)
+        return "U-shaped: ends %s× the middle (%s)" % (fg(U), ci)
     if lo <= 1 <= hi:
-        return "flat: ends %s× the middle (%s)" % (ff(U, 2), ci)
+        return "flat: ends %s× the middle (%s)" % (fg(U), ci)
     if hi < 1:
-        return "ends depleted: %s× the middle (%s)" % (ff(U, 2), ci)
-    return "mild end bias: ends %s× the middle (%s)" % (ff(U, 2), ci)
+        return "ends depleted: %s× the middle (%s)" % (fg(U), ci)
+    return "mild end bias: ends %s× the middle (%s)" % (fg(U), ci)
 
 
 def code_const(path, pattern, n):
@@ -188,17 +231,65 @@ def code_const(path, pattern, n):
     return [float(x) for x in m.groups()][:n] if m else [float("nan")] * n
 
 
+def sid_of(base_af, mn, bs_bp, t):
+    return "b%g_mn%d_bs%g_t%d" % (float(base_af), int(mn), float(bs_bp) / 1e6, int(t))
+
+
+def sid_parse(s):
+    m = re.fullmatch(r"b([\d.]+)_mn(\d+)_bs([\d.]+)_t(\d+)", str(s))
+    return (float(m.group(1)), int(m.group(2)), float(m.group(3)), int(m.group(4))) if m else None
+
+
+def label(d, s):
+    """A reference sequence as people say it: chr7 (a chromosome), chr1 L1 or chr4 core (pieces of chr1, chr4)."""
+    c = d["src"][s][0]
+    if s == c:
+        return short(c)
+    return short(c) + " " + s[len(c) + 1:] if s.startswith(c + "_") else s
+
+
+def to_chrom(d, seq, pos):
+    """Reference-sequence coordinates to chromosome coordinates (a piece's offset in the chromosome it was cut from)."""
+    seq = list(seq)
+    return (np.array([d["src"][s][0] for s in seq], dtype=object),
+            np.asarray(pos, dtype=float) + np.array([d["src"][s][1] for s in seq], dtype=float))
+
+
+def pieces_of(d, c):
+    """The reference sequences of chromosome c, in chromosome order."""
+    return sorted([s for s in d["seqs"] if d["src"][s][0] == c], key=lambda s: d["src"][s][1])
+
+
+def bin_cells(d, c, nb, w):
+    """Nuclei that count for each w-bp bin of chromosome c (those of the piece holding the bin's middle)."""
+    out = np.zeros(nb)
+    for i in range(nb):
+        x = (i + 0.5) * w
+        s = next((s for s in pieces_of(d, c) if d["src"][s][1] <= x < d["src"][s][1] + d["Ls"][s]), pieces_of(d, c)[-1])
+        out[i] = d.get("nseq_used", {}).get(s, d.get("ncell_co", 1)) or 1
+    return out
+
+
 SAMPLES = {r["sample_id"]: r for r in csv.DictReader(open("config/samples.csv"))}
 CFG = yaml.safe_load(open("config/config.yaml")) or {}
+CC = CFG.get("co_calling", {}) or {}
 MIN_CELLS, = code_const("workflow/scripts/marker_segregation.py", r"MIN_CELLS\s*=\s*(\d+)", 1)
 STICKY, = code_const("workflow/scripts/marker_segregation.py", r"STICKY\s*=\s*([\d.]+)", 1)
 GOOD_LO, GOOD_HI = code_const("workflow/scripts/marker_segregation.py", r"GOOD\s*=\s*\(([\d.]+),\s*([\d.]+)\)", 2)
 PARALOG, = code_const("workflow/scripts/marker_segregation.py", r"PARALOG\s*=\s*([\d.]+)", 1)
 HT_W, HT_GAP, HT_MINWIN = code_const("workflow/scripts/haplotype_tracks.py", r"W, GAP, MIN_WIN = (\d+), (\d+), (\d+)", 3)
+AUTO_FRAC, = code_const("workflow/scripts/review_page.py", r'"--auto_frac", type=float, default=([\d.]+)', 1)
+AUTO_SUP, = code_const("workflow/scripts/review_page.py", r'"--auto_support", type=int, default=(\d+)', 1)
+AUTO_PUR, = code_const("workflow/scripts/review_page.py", r'"--auto_purity", type=float, default=([\d.]+)', 1)
+EXP_LOW, = code_const("workflow/scripts/co_masks.py", r"if exp < (\d+):", 1)
+MISS_COV, = code_const("workflow/scripts/co_masks.py", r"elif cov < ([\d.]+):", 1)
+SW_MIX, DBL_COV = code_const("workflow/scripts/co_masks.py", r"elif sw >= ([\d.]+):\s*\n\s*cl = \"doubled\" if cov >= ([\d.]+)", 2)
 
 # =========================================================================== load
 D = {}
 for sp, S in SPP:
+    if S not in SAMPLES:
+        raise SystemExit("sample %s is not in config/samples.csv" % S)
     row = SAMPLES[S]
     d = {"S": S, "row": row, "species": row["species"]}
     fai = row["assembly_fasta"] + ".fai"
@@ -206,11 +297,38 @@ for sp, S in SPP:
         raise SystemExit("no reference index for %s: %s" % (S, fai))
     L = fai_lens(fai)
     n = int(row["chr_number_2n"]) // 2
-    main = sorted(sorted(L, key=lambda c: -L[c])[:n], key=natural)
-    d.update(n=n, main=main, L={c: L[c] for c in main}, G=sum(L[c] for c in main))
+    pp = os.path.join(os.path.dirname(row["assembly_fasta"]), "pieces.tsv")
+    if have_opt(pp):
+        pcs = list(csv.DictReader(open(pp), delimiter="\t"))
+        absent = [r["piece"] for r in pcs if r["piece"] not in L]
+        if absent:
+            raise SystemExit("pieces of %s not in %s: %s" % (S, fai, ", ".join(absent)))
+        seqs = [r["piece"] for r in pcs]
+        src = {r["piece"]: (r["source"], int(r["start"]) - 1) for r in pcs}
+        Lc = {}
+        for r in pcs:
+            Lc[r["source"]] = max(Lc.get(r["source"], 0), int(r["end"]))
+            ln = int(r["end"]) - int(r["start"]) + 1
+            if L[r["piece"]] != ln:
+                PROBLEMS.append(("reference pieces %s" % S, "%s is %s bp in pieces.tsv but %s bp in %s"
+                                 % (r["piece"], fi(ln), fi(L[r["piece"]]), fai)))
+        chroms = sorted(Lc, key=natural)
+        cuts = {c: sorted(int(r["start"]) - 1 for r in pcs if r["source"] == c and int(r["start"]) > 1) for c in chroms}
+    else:
+        seqs = sorted(sorted(L, key=lambda c: -L[c])[:n], key=natural)
+        src = {c: (c, 0) for c in seqs}
+        Lc = {c: L[c] for c in seqs}
+        chroms, cuts = list(seqs), {c: [] for c in seqs}
+    d.update(n=n, seqs=seqs, Ls={s: L[s] for s in seqs}, src=src, main=chroms, L=Lc, cuts=cuts,
+             G=sum(Lc.values()), pieces=any(cuts.values()))
+    d["how"] = {}
+    plan = "config/split_plans/%s.csv" % S
+    if d["pieces"] and have_opt(plan):
+        d["how"] = {r["piece"]: r.get("how", "") for r in csv.DictReader(l for l in open(plan) if not l.startswith("#"))}
     put(sp, "chromosomes", n)
+    put(sp, "reference_sequences", len(seqs))
     put(sp, "reference_1C_mb", d["G"] / 1e6)
-    # the phased two-haplotype assembly the reference came from (MANIFEST of the published hap1)
+    # the phased two-haplotype assembly the reference came from (MANIFEST of the reference, else of the published hap1)
     for man in (os.path.join(os.path.dirname(row["assembly_fasta"]), "MANIFEST.txt"),
                 os.path.join(A.refs_root, "%s_hap1" % row["species"], "MANIFEST.txt")):
         if os.path.exists(man):
@@ -226,7 +344,7 @@ for sp, S in SPP:
                 put(sp, "assembly_2C_all_mb", d["asm2n_all_mb"])
             break
 
-    # ---- markers
+    # ---- markers (reference-sequence coordinates in the files; 'chrom'/'pos' here are chromosome coordinates)
     p = "results/markers/%s/filter_summary.txt" % S
     if have(p):
         t = open(p).read()
@@ -248,12 +366,19 @@ for sp, S in SPP:
         mc = pd.read_csv(p, sep="\t", usecols=["chrom", "pos", "class"], dtype={"chrom": str})
         d["classes"] = mc["class"].value_counts().to_dict()
         d["seen"] = len(mc)
-        d["good"] = mc[(mc["class"] == "good") & mc.chrom.isin(main)][["chrom", "pos"]].copy()
+        g = mc[(mc["class"] == "good") & mc.chrom.isin(seqs)][["chrom", "pos"]].copy()
+        g["seq"] = g.chrom.values
+        g["chrom"], g["pos"] = to_chrom(d, g.seq, g.pos)
+        d["good"] = g
     p = row["annotation_gff"]
     if have(p):
         g = pd.read_csv(p, sep="\t", comment="#", header=None, usecols=[0, 2, 3, 4],
                         names=["chrom", "type", "start", "end"], dtype={0: str}, low_memory=False)
-        d["genes"] = g[(g.type == "gene") & g.chrom.isin(main)][["chrom", "start", "end"]].copy()
+        g = g[(g.type == "gene") & g.chrom.isin(seqs)][["chrom", "start", "end"]].copy()
+        s0 = g.chrom.values
+        g["chrom"], g["start"] = to_chrom(d, s0, g.start)
+        _, g["end"] = to_chrom(d, s0, g.end)
+        d["genes"] = g
 
     # ---- scRNA, cells
     p = "results/starsolo/%s/Log.final.out" % S
@@ -281,26 +406,36 @@ for sp, S in SPP:
     p = "results/cell_qc/%s/good_cells.tsv" % S
     d["cells"] = lines_of(p) if have(p) else []
 
-    # ---- crossovers
+    # ---- dosage masks, crossovers
+    p = "results/crossovers/%s/masks.tsv" % S
+    if have(p):
+        mk = pd.read_csv(p, sep="\t", dtype={"barcode": str, "chrom": str})
+        if (~mk.chrom.isin(seqs)).any():
+            WARN.append("%s: masks.tsv has %d rows for sequences not in the reference (left out): %s"
+                        % (S, int((~mk.chrom.isin(seqs)).sum()), ", ".join(sorted(set(mk.chrom[~mk.chrom.isin(seqs)]))[:5])))
+            mk = mk[mk.chrom.isin(seqs)].copy()
+        d["masks"] = mk
+        d["masked_pairs"] = set(zip(mk.barcode[mk.masked == "yes"], mk.chrom[mk.masked == "yes"]))
+    p = "results/crossovers/%s/cells_per_chrom.tsv" % S
+    if have(p):
+        cpc = pd.read_csv(p, sep="\t", dtype={"chrom": str})
+        d["nseq"] = {c: v for c, v in zip(cpc.chrom, cpc.n_cells) if c in seqs}
+    p = "results/crossovers/%s/co_intervals_masked.bed" % S
+    if have(p):
+        d["masked_calls"] = sum(1 for l in open(p) if l.strip())
     p = "results/crossovers/%s/co_per_cell.tsv" % S
     if have(p):
         d["per"] = pd.read_csv(p, sep="\t")
     p = "results/crossovers/%s/co_intervals.bed" % S
     if have(p):
-        co = pd.read_csv(p, sep="\t", header=None, usecols=[0, 1, 2, 3], names=["chrom", "start", "end", "barcode"],
+        co = pd.read_csv(p, sep="\t", header=None, usecols=[0, 1, 2, 3], names=["seq", "start", "end", "barcode"],
                          dtype={0: str})
-        co = co[co.chrom.isin(main)].copy()
+        co = co[co.seq.isin(seqs)].copy()
+        s0 = co.seq.values
+        co["chrom"], co["start"] = to_chrom(d, s0, co.start)
+        _, co["end"] = to_chrom(d, s0, co.end)
         co["mid"] = (co.start + co.end) / 2
-        co["u"] = co.mid / co.chrom.map(d["L"])
-        co["at_join"] = False
-        for _, c, mb in JOINS.get(S, []):
-            co.loc[(co.chrom == c) & ((co.mid - mb * 1e6).abs() <= 10e6), "at_join"] = True
-        co["near_join"] = co.at_join & (S in ARTEFACT_JOINS)     # left out of the "without joins" versions
-        if JOINS.get(S):
-            # observed within 10 Mb of the joins, against the chromosome's own average for any 20 Mb
-            d["at_join_cos"] = int(co.at_join.sum())
-            d["at_join_exp"] = float(sum((co.chrom == c).sum() * 20e6 / d["L"][c]
-                                         for _, c, _ in JOINS[S] if c in d["L"]))
+        co["u"] = co.mid / co.chrom.map(d["L"]).astype(float)
         d["co"] = co
     p = "results/landscape/%s/coc_table.tsv" % S
     if have(p):
@@ -311,43 +446,113 @@ for sp, S in SPP:
         pooled = gm[gm.iloc[:, 0].astype(str) == "POOLED"]
         for k, v in (pooled.iloc[0].to_dict().items() if len(pooled) else []):
             put(sp, "gamma_pooled." + str(k), v)
+
+    # ---- regions left out of the molecule tables (config/exclude_regions; optional)
+    p = "config/exclude_regions/%s.csv" % S
+    if have_opt(p):
+        d["excl"] = list(csv.DictReader(l for l in open(p) if not l.startswith("#")))
+        d["excl_file"] = p
+        lg = "logs/cell_data_molecules/%s.log" % S
+        if have(lg):
+            m = re.search(r"excluded regions \((.*?)\): (.*?) -- ([\d,]+) molecules dropped", open(lg).read())
+            if m:
+                d["excl_dropped"] = int(m.group(3).replace(",", ""))
+                want = sorted("%s:%d-%d" % (r["chrom"], int(r["start"]), int(r["end"])) for r in d["excl"])
+                if sorted(x.strip() for x in m.group(2).split(",")) != want:
+                    WARN.append("%s: the molecule tables left out %s, but %s lists %s: rebuild the tables"
+                                % (S, m.group(2), p, ", ".join(want)))
     D[sp] = d
 B, Pd = D["binata"], D["paradoxa"]
 
 
+def consistency(sp, d):
+    """The run on disk against the config this report quotes: hapCO settings (co_calling_params.txt), dosage masks
+    (masks.tsv) and regions left out (the molecule-table log). A mismatch is listed in red at the top of the page.
+    Also the Python port of hapCO against the pipeline's own calls (co_sweep.py --check log), where it was run."""
+    S, c = d["S"], CC.get(d["species"]) or {}
+    p = "results/crossovers/%s/co_calling_params.txt" % S
+    if have(p):
+        t = open(p).read()
+        got = {}
+        for k, pat in (("block_size", r"block_size\s+\(-s\):\s*(\S+)"), ("marker_num", r"marker_num\s+\(-n\):\s*(\S+)"),
+                       ("base_af", r"baseAF:\s*(\S+)"), ("window_af", r"windowAF:\s*(\S+)"),
+                       ("genotype", r"genotype:\s*(\S+)"), ("terminal_marker_num", r"terminal_marker_num:\s*(\S+)")):
+            m = re.search(pat, t)
+            if m:
+                got[k] = m.group(1)
+        d["ran"] = got
+        for k, v in got.items():
+            try:
+                same = float(v) == float(c[k])
+            except (KeyError, TypeError, ValueError):
+                same = k not in c
+            if not same:
+                WARN.append("%s: crossovers were called with %s = %s, but the config (quoted in this report) says %s"
+                            % (S, k, v, c[k]))
+    if "masks" in d:
+        mc = set(c.get("mask_classes", []) or [])
+        mm = d["masks"]
+        bad = int((mm["class"].isin(mc) != (mm.masked == "yes")).sum())
+        if bad:
+            WARN.append("%s: %d rows of masks.tsv are masked differently from config mask_classes (%s): masks from "
+                        "an older run?" % (S, bad, ", ".join(sorted(mc)) or "none"))
+    if d.get("excl") and "excl_dropped" not in d:
+        WARN.append("%s: config/exclude_regions/%s.csv lists %s, but logs/cell_data_molecules/%s.log has no "
+                    "'excluded regions' line: were the molecule tables rebuilt with it?"
+                    % (S, S, ", ".join("%s:%s-%s" % (r["chrom"], r["start"], r["end"]) for r in d["excl"]), S))
+    p = "logs/%s_sweep_check.log" % S
+    if have_opt(p):
+        t = open(p).read()
+        m = re.search(r"identical in (\d+) of (\d+) cells", t)
+        m2 = re.search(r"at the settings it ran with \(([^;)]+)", t)
+        if m:
+            d["port_check"] = (int(m.group(1)), int(m.group(2)), m2.group(1) if m2 else "?")
+            try:
+                chosen = sid_of(c["base_af"], c["marker_num"], c["block_size"], c["terminal_marker_num"])
+            except (KeyError, TypeError, ValueError):
+                chosen = None
+            if d["port_check"][0] != d["port_check"][1] or (chosen and d["port_check"][2] != chosen):
+                WARN.append("%s: the Python port matched the R's calls in %s of %s nuclei at %s (chosen: %s; %s)"
+                            % (S, m.group(1), m.group(2), d["port_check"][2], chosen, p))
+
+
+for sp, d in D.items():
+    guarded("consistency checks %s" % sp, lambda sp=sp, d=d: consistency(sp, d))
+
+
 # ============================================================ window genotypes per cell
 def window_genotypes(d):
+    """WIN_MB windows of every reference sequence: per nucleus 1 (ALT) or 0 (REF) where >= MIN_MOL molecules agree
+    >= 80%, else NaN; NaN also where the sequence is masked for dosage in that nucleus."""
     S, W = d["S"], int(WIN_MB * 1e6)
-    nwin = {c: max(1, int(round(d["L"][c] / W))) for c in d["main"]}
-    wins = [(c, i) for c in d["main"] for i in range(nwin[c])]
+    nwin = {c: max(1, int(round(d["Ls"][c] / W))) for c in d["seqs"]}
+    wins = [(c, i) for c in d["seqs"] for i in range(nwin[c])]
     widx = {w: k for k, w in enumerate(wins)}
+    masked = d.get("masked_pairs", set())
     G = np.full((len(d["cells"]), len(wins)), np.nan)
     nmol = {}
     for ci, bc in enumerate(d["cells"]):
         p = "results/cell_data_mol/%s/%s.tsv" % (S, bc)
-        if not os.path.exists(p):
+        if not os.path.exists(p) or os.path.getsize(p) == 0:
             continue
         m = pd.read_csv(p, sep="\t", header=None, usecols=[0, 1, 3, 5], names=["chrom", "pos", "rc", "ac"],
                         dtype={0: str})
-        m = m[(m.rc != m.ac) & m.chrom.isin(d["L"])].copy()
+        m = m[(m.rc != m.ac) & m.chrom.isin(d["Ls"])].copy()
         m["alt"] = (m.ac > m.rc).astype(int)
         nmol[bc] = len(m)
+        if not len(m):
+            continue
         m["w"] = [min(int(q // W), nwin[c] - 1) for c, q in zip(m.chrom, m.pos)]
         g = m.groupby(["chrom", "w"]).alt.agg(["mean", "size"])
         for (c, w), r in g.iterrows():
-            if r["size"] >= MIN_MOL and (r["mean"] >= 0.8 or r["mean"] <= 0.2):
-                G[ci, widx[(c, w)]] = 1 if r["mean"] >= 0.8 else 0
+            if (bc, c) in masked:
+                continue
+            if r["size"] >= MIN_MOL and (r["mean"] >= GT_MAJ - 1e-9 or 1 - r["mean"] >= GT_MAJ - 1e-9):
+                G[ci, widx[(c, w)]] = 1 if r["mean"] >= GT_MAJ - 1e-9 else 0
     USED.append("results/cell_data_mol/%s/<barcode>.tsv (%d cells)" % (S, len(nmol)))
-    d["mol_per_cell"] = pd.Series(nmol)
-    M = (~np.isnan(G)).astype(float)
-    X, Y = np.nan_to_num(G) * M, (1 - np.nan_to_num(G)) * M
-    shared, agree = M @ M.T, X @ X.T + Y @ Y.T
-    iu = np.triu_indices(len(d["cells"]), 1)
-    sh, ag = shared[iu], agree[iu]
-    keep = sh >= 20
-    sim = np.full(len(sh), np.nan)
-    sim[keep] = ag[keep] / sh[keep]
-    dup = keep & (sim >= 0.95)
+    d["mol_per_cell"] = pd.Series(nmol, dtype=float)
+    d["Gw"], d["wins"], d["nwin"], d["widx"] = G, wins, nwin, widx
+    sim, keep, dup, iu = near_identical(G)
     d["pair_sim_median"] = float(np.nanmedian(sim)) if keep.any() else float("nan")
     d["dup_pairs"] = int(dup.sum())
     d["dup_cells"] = len(set(iu[0][dup]) | set(iu[1][dup]))
@@ -361,12 +566,194 @@ def window_genotypes(d):
         return a
     for a, b in zip(iu[0][dup], iu[1][dup]):
         parent[root(a)] = root(b)
-    d["distinct_genotypes"] = len({root(a) for a in range(len(d["cells"]))})
-    d["called_share"] = float(M.mean())
+    seen, rep = set(), []
+    for a in range(len(d["cells"])):
+        if root(a) not in seen:
+            seen.add(root(a))
+            rep.append(a)
+    d["rep_idx"] = np.array(rep, dtype=int)
+    d["distinct_genotypes"] = len(rep)
+    d["called_share"] = float((~np.isnan(G)).mean()) if G.size else float("nan")
+
+
+def near_identical(G):
+    """Pairs of nuclei whose window genotypes agree in >= DUP_AGREE of >= DUP_MIN windows called in both."""
+    M = (~np.isnan(G)).astype(float)
+    X, Y = np.nan_to_num(G) * M, (1 - np.nan_to_num(G)) * M
+    shared, agree = M @ M.T, X @ X.T + Y @ Y.T
+    iu = np.triu_indices(len(G), 1)
+    sh, ag = shared[iu], agree[iu]
+    keep = sh >= DUP_MIN
+    sim = np.full(len(sh), np.nan)
+    sim[keep] = ag[keep] / sh[keep]
+    return sim, keep, keep & (sim >= DUP_AGREE), iu
 
 
 for sp, d in D.items():
     guarded("window genotypes %s" % sp, lambda d=d: window_genotypes(d))
+
+
+# ======================================================= pollen co-segregation (phi)
+def phi_matrix(G):
+    """phi between every two windows over the nuclei with a genotype in both (NaN below PHI_N nuclei): 2 x 2 counts
+    from matrix products, phi = (n11 n00 - n10 n01) / sqrt(n1. n0. n.1 n.0)."""
+    X1, X0 = (G == 1).astype(float), (G == 0).astype(float)
+    n11, n00, n10, n01 = X1.T @ X1, X0.T @ X0, X1.T @ X0, X0.T @ X1
+    n = n11 + n00 + n10 + n01
+    den = np.sqrt((n11 + n10) * (n01 + n00) * (n11 + n01) * (n10 + n00))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ph = (n11 * n00 - n10 * n01) / den
+    ph[(den == 0) | (n < PHI_N)] = np.nan
+    return ph, n
+
+
+def relations(d):
+    """What the assembly says about two reference sequences: the same chromosome (cut for calling), or a split-plan
+    note that a piece's copy in the other haplotype lies on the other's chromosome. Returns {(a, b): text}."""
+    rel = {}
+    for a in d["seqs"]:
+        for b in d["seqs"]:
+            if a >= b:
+                continue
+            ca, cb = d["src"][a][0], d["src"][b][0]
+            if ca == cb:
+                rel[(a, b)] = "one chromosome in the assembly (%s), cut for crossover calling" % ca
+                continue
+            notes = []
+            for x, y in ((a, b), (b, a)):
+                m = re.search(r"homolog (chr\d+)_hap\d", d["how"].get(x, ""))
+                if m and m.group(1) != short(d["src"][x][0]) and m.group(1) == short(d["src"][y][0]):
+                    notes.append("the other haplotype's copy of %s is part of %s (split plan)" % (label(d, x), m.group(1)))
+            if notes:
+                rel[(a, b)] = "; ".join(notes)
+    return rel
+
+
+def cosegregation(d, one_per_group=False):
+    """Which reference sequences are inherited together? phi between windows over the nuclei (one per group of
+    near-identical nuclei when those exceed chance: the shuffles assume independent nuclei); per pair of sequences
+    the strongest |phi| over their window pairs, against NPERM shuffles of the nuclei done independently per
+    sequence (each sequence keeps its own linkage, any between sequences is broken). Chance level: 95th percentile
+    of the strongest pair per shuffle (family-wise)."""
+    rng = stream("cosegregation", d["S"], one_per_group)
+    G = d["Gw"][d["rep_idx"]] if one_per_group else d["Gw"]
+    G = G[~np.all(np.isnan(G), axis=1)]
+    d["phi_one_per_group"] = one_per_group
+    seqs, wins = d["seqs"], d["wins"]
+    blk = {s: np.array([k for k, (c, _) in enumerate(wins) if c == s]) for s in seqs}
+    ph, nn = phi_matrix(G)
+    ns = len(seqs)
+    iu = np.triu_indices(ns, 1)
+
+    def pair_max(P):
+        M = np.full((ns, ns), np.nan)
+        for a, b in zip(*iu):
+            x = np.abs(P[np.ix_(blk[seqs[a]], blk[seqs[b]])])
+            if np.isfinite(x).any():
+                M[a, b] = M[b, a] = np.nanmax(x)
+        return M
+    obs = pair_max(ph)
+    perm = np.full((NPERM, ns, ns), np.nan)
+    for k in range(NPERM):
+        Gp = np.empty_like(G)
+        for s in seqs:
+            Gp[:, blk[s]] = G[np.ix_(rng.permutation(len(G)), blk[s])]
+        perm[k] = pair_max(phi_matrix(Gp)[0])
+    fw = np.nanmax(perm[:, iu[0], iu[1]], axis=1)
+    thr = float(np.nanpercentile(fw, 95))
+    pair_thr = np.nanpercentile(perm, 95, axis=0)
+    rel = relations(d)
+    # sequences connected through what the assembly says (a path of relations) explain each other
+    adj = collections.defaultdict(set)
+    for a, b in rel:
+        adj[a].add(b)
+        adj[b].add(a)
+
+    def path(a, b):
+        prev, todo = {a: None}, [a]
+        while todo:
+            x = todo.pop(0)
+            for y in adj[x]:
+                if y not in prev:
+                    prev[y] = x
+                    todo.append(y)
+        if b not in prev:
+            return None
+        out, x = [], b
+        while x is not None:
+            out.append(x)
+            x = prev[x]
+        return out[::-1]
+    rows = []
+    W = WIN_MB * 1e6
+    for a, b in zip(*iu):
+        if not (np.isfinite(obs[a, b]) and obs[a, b] > thr):
+            continue
+        sa, sb = seqs[a], seqs[b]
+        sub = ph[np.ix_(blk[sa], blk[sb])]
+        i, j = np.unravel_index(np.nanargmax(np.abs(sub)), sub.shape)
+        key = (min(sa, sb), max(sa, sb))
+        pth = path(sa, sb)
+        if key in rel:
+            why, expl = rel[key], True
+        elif pth:
+            why, expl = "through %s" % " and ".join(label(d, x) for x in pth[1:-1]), True
+        else:
+            why, expl = "different chromosomes in the assembly: not explained", False
+        span = lambda s, k: ((d["src"][s][1] + k * W) / 1e6,
+                             (d["src"][s][1] + ((k + 1) * W if k < d["nwin"][s] - 1 else d["Ls"][s])) / 1e6)
+        rows.append(dict(a=sa, b=sb, phi=float(sub[i, j]), absphi=float(abs(sub[i, j])),
+                         n=int(nn[blk[sa][i], blk[sb][j]]), wa=span(sa, i), wb=span(sb, j),
+                         chance=float(pair_thr[a, b]), as_strong=int(np.sum(fw >= obs[a, b])),
+                         p=(1 + int(np.sum(fw >= obs[a, b]))) / (1.0 + NPERM), why=why, explained=expl))
+    rows.sort(key=lambda r: -r["absphi"])
+    # pairs the assembly says belong together (same chromosome, or a split-plan homolog note) but not above chance
+    missing = []
+    for (x, y), why in sorted(rel.items()):
+        a, b = seqs.index(x), seqs.index(y)
+        if not (np.isfinite(obs[a, b]) and obs[a, b] > thr):
+            missing.append(dict(a=x, b=y, absphi=float(obs[a, b]), why=why))
+    d.update(phi=ph, phi_n=nn, pair_obs=obs, pair_thr=pair_thr, fw_thr=thr, co_pairs=rows, phi_nuclei=len(G),
+             phi_blk=blk, unexplained=[r for r in rows if not r["explained"]], expected_missing=missing,
+             expected_pairs=len(rel))
+
+
+def dup_chance(d, nshuf=NSHUF_DUP):
+    """Near-identical pairs among unrelated nuclei: the nuclei shuffled independently per linkage group (sequences
+    inherited together above chance form one group), which keeps how the genome is linked and breaks any
+    relationship between nuclei; the same rule counted on each shuffle."""
+    G, rng = d["Gw"], stream("near-identical", d["S"])
+    par = {s: s for s in d["seqs"]}
+
+    def f(x):
+        while par[x] != x:
+            x = par[x]
+        return x
+    for r in d.get("co_pairs", []):
+        par[f(r["a"])] = f(r["b"])
+    groups = collections.defaultdict(list)
+    for k, (s, _) in enumerate(d["wins"]):
+        groups[f(s)].append(k)
+    cnt = []
+    for _ in range(nshuf):
+        Gp = np.empty_like(G)
+        for cols in groups.values():
+            cols = np.array(cols)
+            Gp[:, cols] = G[np.ix_(rng.permutation(len(G)), cols)]
+        cnt.append(int(near_identical(Gp)[2].sum()))
+    cnt = np.array(cnt)
+    d["dup_chance"] = (float(np.mean(cnt)), float(np.percentile(cnt, 2.5)), float(np.percentile(cnt, 97.5)))
+    d["dup_p"] = (1 + int(np.sum(cnt >= d["dup_pairs"]))) / (1.0 + nshuf)
+    d["link_groups"] = len(groups)
+
+
+for sp, d in D.items():
+    if "Gw" in d:
+        guarded("pollen co-segregation %s" % sp, lambda d=d: cosegregation(d))
+        guarded("near-identical nuclei by chance %s" % sp, lambda d=d: dup_chance(d))
+        if d.get("dup_p", 1.0) < 0.05:          # siblings present: the shuffles assume independent nuclei
+            guarded("pollen co-segregation %s, one nucleus per group" % sp,
+                    lambda d=d: cosegregation(d, one_per_group=True))
 
 
 # ======================================================================= markers
@@ -401,6 +788,15 @@ def marker_stats(d):
              gap_median_kb=float(np.median(gaps)) / 1e3, gap_p95_kb=float(np.percentile(gaps, 95)) / 1e3,
              gap_max_mb=float(gaps.max()) / 1e6, gap_1mb_share=float(gaps[gaps > 1e6].sum()) / d["G"],
              good_in_genes=ing / tot if tot and gi else float("nan"))
+    # at each cut, the stretch between the nearest good markers on either side: a crossover there cannot be called
+    d["cut_gaps"] = []
+    for c, xs in d["cuts"].items():
+        pos = np.sort(gm.pos[gm.chrom == c].values)
+        for x in xs:
+            k = np.searchsorted(pos, x, side="right")
+            a = pos[k - 1] if k > 0 else 0.0
+            b = pos[k] if k < len(pos) else float(d["L"][c])
+            d["cut_gaps"].append((c, x, a, b))
 
 
 def raw_variants(d):
@@ -461,37 +857,36 @@ for sp, d in D.items():
 def co_stats(d):
     per, co = d["per"], d["co"]
     ncell = len(per)
+    nseq = {s: int(d.get("nseq", {}).get(s, ncell)) for s in d["seqs"]}
+    d["nseq_used"] = nseq
     d.update(ncell_co=ncell, co_total=len(co), co_mean=per.n_cos.mean(), co_sd=per.n_cos.std(),
              co_median=per.n_cos.median())
-    d["per_chrom"] = {c: (co.chrom == c).sum() / ncell for c in d["main"]}
+    # per sequence: crossovers per nucleus that counts for it (masked nuclei do not); per chromosome: sum of its pieces
+    d["co_seq"] = {s: int((co.seq == s).sum()) for s in d["seqs"]}
+    d["per_seq"] = {s: d["co_seq"][s] / max(nseq[s], 1) for s in d["seqs"]}
+    d["per_chrom"] = {c: sum(d["per_seq"][s] for s in pieces_of(d, c)) for c in d["main"]}
+    d["map_cm"] = 100 * sum(d["per_seq"].values())
     d["below_half"] = [c for c, v in d["per_chrom"].items() if v < 0.5]
     d["below_obligate"] = int((per.n_cos < d["n"] / 2).sum())
+    # with exactly one crossover per bivalent, each grain gets each crossover with p 1/2: Binomial(n, 1/2) per grain
+    d["below_obligate_exp"] = ncell * sum(math.comb(d["n"], k) for k in range(d["n"] + 1) if k < d["n"] / 2) / 2.0 ** d["n"]
     d["width_median_kb"] = float((co.end - co.start).median()) / 1e3
     cidx = {b: k for k, b in enumerate(per.barcode)}
     rows = co.barcode.map(cidx)
     okr = rows.notna().values
     bix = np.minimum((co.u.values * BINS).astype(int), BINS - 1)
-
-    def counts(mask):
-        C = np.zeros((ncell, BINS))
-        np.add.at(C, (rows[okr & mask].astype(int).values, bix[okr & mask]), 1)
-        return C
-    d["land"] = profile(counts(np.ones(len(co), bool)))
+    C = np.zeros((ncell, BINS))
+    np.add.at(C, (rows[okr].astype(int).values, bix[okr]), 1)
+    d["land"] = profile(C, stream("landscape", d["S"]))
     d["shape"] = shape(d["land"]["U"], d["land"]["U_lo"], d["land"]["U_hi"])
-    if co.near_join.any():
-        d["join_cos"] = int(co.near_join.sum())
-        d["land_nj"] = profile(counts(~co.near_join.values))
-        d["shape_nj"] = shape(d["land_nj"]["U"], d["land_nj"]["U_lo"], d["land_nj"]["U_hi"])
-        nj = co[co.near_join].groupby("barcode").size()
-        d["per_nj"] = per.n_cos - per.barcode.map(nj).fillna(0).values
-        d["co_mean_nj"] = float(d["per_nj"].mean())
     if "good" in d:
-        mu = (d["good"].pos / d["good"].chrom.map(d["L"])).values
+        mu = (d["good"].pos / d["good"].chrom.map(d["L"]).astype(float)).values
         h = np.histogram(mu, bins=BINS, range=(0, 1))[0].astype(float)
         d["mprof"], d["U_markers"] = h / h.mean(), uidx(h)
     if "genes" in d:
         g = d["genes"]
-        h = np.histogram((((g.start + g.end) / 2) / g.chrom.map(d["L"])).values, bins=BINS, range=(0, 1))[0]
+        h = np.histogram((((g.start + g.end) / 2) / g.chrom.map(d["L"]).astype(float)).values, bins=BINS,
+                         range=(0, 1))[0]
         d["gprof"], d["U_genes"] = h / h.mean(), uidx(h.astype(float))
     # 5 Mb windows: detectability and the busiest windows
     a, b, wl = [], [], []
@@ -509,9 +904,7 @@ def co_stats(d):
     d["busiest"] = []
     for i in top:
         c, w = wl[i]
-        near = any(c == jc and abs((w + 0.5) * 5 - mb) <= 10 for _, jc, mb in JOINS.get(d["S"], []))
-        d["busiest"].append([c, "%d–%d" % (w * 5, w * 5 + 5), a[i], ff(mu), "%.1e" % poisson_tail(a[i], mu),
-                             "yes" if near else ""])
+        d["busiest"].append([c, "%d–%d" % (w * 5, w * 5 + 5), a[i], ff(mu), p_txt(poisson_logtail(a[i], mu))])
     d["window_mean"] = mu
 
 
@@ -519,77 +912,7 @@ for sp, d in D.items():
     if "per" in d and "co" in d:
         guarded("crossover statistics %s" % sp, lambda d=d: co_stats(d))
     d.setdefault("shape", "–")
-HEAD = {sp: d.get("shape_nj", d["shape"]) for sp, d in D.items()}
-
-
-# ========================================================================== rDNA
-def rdna_depth(d):
-    """HiFi reads over each rDNA array against a typical 20 kb window: collapsed copies."""
-    gff = "results/blacklist/%s/rrna.gff" % d["S"]
-    bam = "results/markers/%s/hifi.bam" % d["S"]
-    sam = tool("samtools")
-    if not (have(gff) and have(bam)) or not sam:
-        d["rdna_note"] = "skipped: %s" % ("samtools not found" if not sam else "rrna.gff or hifi.bam missing")
-        return
-    g = pd.read_csv(gff, sep="\t", comment="#", header=None, usecols=[0, 3, 4, 8], names=["chrom", "start", "end", "att"],
-                    dtype={0: str})
-    g = g[g.chrom.isin(d["main"])].sort_values(["chrom", "start"])
-    g["gene"] = g.att.str.extract(r"Name=([0-9_.]+S)", expand=False).fillna("?")
-    arrays = []
-    for c, x in g.groupby("chrom"):
-        cur = None
-        for _, r in x.iterrows():
-            if cur and r.start - cur["end"] < 50000:
-                cur["end"] = max(cur["end"], r.end)
-                cur["genes"].append(r.gene)
-            else:
-                cur = {"chrom": c, "start": r.start, "end": r.end, "genes": [r.gene]}
-                arrays.append(cur)
-
-    def count(c, s, e):
-        mid = (s + e) // 2
-        s, e = min(s, mid - 10000), max(e, mid + 10000)
-        out = subprocess.run([sam, "view", "-c", "-F", "0x904", bam, "%s:%d-%d" % (c, max(1, s), e)],
-                             stdout=subprocess.PIPE, universal_newlines=True).stdout.strip()
-        return int(out or 0), e - max(1, s)
-    base = []
-    for _ in range(120):
-        c = d["main"][rng.integers(0, len(d["main"]))]
-        s = int(rng.integers(20000, max(20001, d["L"][c] - 20000)))
-        base.append(count(c, s, s + 20000)[0])
-    b0 = max(float(np.median(base)), 1.0)
-    rows = []
-    for a in arrays:
-        n, span = count(a["chrom"], a["start"], a["end"])
-        typ = "45S" if any(x in ("18S", "28S", "5_8S", "5.8S") for x in a["genes"]) else "5S"
-        fold = n / (b0 * span / 20000.0)
-        near = ["%s (%.1f Mb away)" % (j, abs((a["start"] + a["end"]) / 2e6 - mb)) for j, jc, mb in JOINS.get(d["S"], [])
-                if jc == a["chrom"] and abs((a["start"] + a["end"]) / 2e6 - mb) <= 5]
-        gs = pd.Series(a["genes"]).value_counts()
-        complete = "18S" in a["genes"] and "28S" in a["genes"]
-        n5s = int(gs.get("5S", 0))
-        trust = complete or fold >= 5 or n5s >= 50
-        rows.append([a["chrom"], "%.2f" % (a["start"] / 1e6), typ, ", ".join("%s x%d" % (k, v) for k, v in gs.items()),
-                     n, fold, "; ".join(near), complete, n5s, trust, a["start"], a["end"]])
-    rows.sort(key=lambda r: -r[5])
-    d["rdna_n_arrays"] = len(rows)
-    d["rdna_n_trust"] = sum(r[9] for r in rows)
-    d["rdna_rows"], d["rdna_base"] = rows, b0
-    d["rdna_45s_n"] = sum(r[2] == "45S" for r in rows)
-    d["rdna_45s_complete"] = sum(r[7] for r in rows)
-    d["rdna_at_join"] = []
-    for j, jc, mb in JOINS.get(d["S"], []):
-        near = [r for r in rows if r[0] == jc and abs((r[10] + r[11]) / 2e6 - mb) <= 5]
-        if near:
-            r = max(near, key=lambda r: r[5])
-            d["rdna_at_join"].append("%s: %s array at %.1f Mb, %s× the reads of a typical window%s" % (
-                j, r[2], (r[10] + r[11]) / 2e6, fi(r[5]), ", a complete 45S unit" if r[7] else ""))
-        else:
-            d["rdna_at_join"].append("%s: no rDNA within 5 Mb" % j)
-
-
-for sp, d in D.items():
-    guarded("rDNA read depth %s" % sp, lambda d=d: rdna_depth(d))
+HEAD = {sp: d["shape"] for sp, d in D.items()}
 
 # ===================================================== structure between the haplotypes
 KINDS = ["collinear", "INVERTED", "TRANSLOCATED"]
@@ -609,9 +932,9 @@ def covered(iv, a, b):
     return sum(max(0, min(e, b) - max(s0, a)) for s0, e in iv)
 
 
-def structure(d):
-    """hap2-on-hap1 synteny blocks (translocation_map.py) in this reference's coordinates: for each chromosome,
-    where its other-haplotype copy aligns collinear, inverted, from another chromosome, or not at all."""
+def structure(sp, d):
+    """hap2-on-hap1 synteny blocks (translocation_map.py) on each chromosome of this reference: where its
+    other-haplotype copy aligns collinear, inverted, from another chromosome, or not at all."""
     sid = next((k for k, r in SAMPLES.items() if r["species"] == d["species"] and r["haplotype"] == "hap1"), None)
     p = "qc/translocations/%s/%s_synteny_blocks.tsv" % (sid, sid)
     if not have(p):
@@ -626,14 +949,13 @@ def structure(d):
         st[c]["any"] = merge([(int(a), int(b)) for a, b in zip(s0, e0)])
     d["struct"], d["struct_src"] = st, p
     for k in KINDS:
-        put("paradoxa" if d is Pd else "binata", "struct_mb." + k,
-            sum(covered(st[c][k], 0, d["L"][c]) for c in d["main"]) / 1e6)
+        put(sp, "struct_mb." + k, sum(covered(st[c][k], 0, d["L"][c]) for c in d["main"]) / 1e6)
 
 
 def dead_spots(d, w=5e6):
-    """Runs of 5 Mb windows without a crossover (join artefact excluded) and what they overlap. Only runs long
-    enough that fewer than one is expected by chance (same crossovers per chromosome, placed uniformly) are kept."""
-    co = d["co"][~d["co"].near_join]
+    """Runs of 5 Mb windows without a crossover and what they overlap. Only runs long enough that fewer than one is
+    expected by chance (same crossovers per chromosome, placed uniformly) are kept."""
+    co, rng = d["co"], stream("dead spots", d["S"])
     gm = d.get("good")
 
     def runs(cnt, L):
@@ -675,14 +997,14 @@ def dead_spots(d, w=5e6):
             sh = {k: covered(st[k], a, b) / ln for k in KINDS} if st else {}
             none = 1 - covered(st["any"], a, b) / ln if st else float("nan")
             m = mk[int(a // w):int(math.ceil(b / w))].mean() / med
-            join = any(jc == c and a <= mb * 1e6 <= b for _, jc, mb in JOINS.get(d["S"], []))
+            cut = any(a < x < b for x in d["cuts"].get(c, []))
             cause = ("inverted in the other haplotype" if sh.get("INVERTED", 0) >= 0.5 else
                      "no homolog in the other haplotype" if ok(none) and none >= 0.5 else
                      "translocated segment" if sh.get("TRANSLOCATED", 0) >= 0.5 else
                      "few markers" if m < 0.25 else "not explained by structure or markers")
             rows.append([c, "%.0f–%.0f" % (a / 1e6, b / 1e6), ff(ln / 1e6, 0),
                          ff(100 * sh.get("INVERTED", float("nan")), 0), ff(100 * sh.get("TRANSLOCATED", float("nan")), 0),
-                         ff(100 * none, 0), ff(m, 2), "yes" if join else "", cause])
+                         ff(100 * none, 0), ff(m, 2), "yes" if cut else "", cause])
     d["dead"], d["dead_thr"] = rows, thr
     d["dead_chance"] = (float(chance.mean()), np.percentile(chance, 2.5), np.percentile(chance, 97.5))
     d["dead_mb"] = sum(float(r[2]) for r in rows)
@@ -690,9 +1012,125 @@ def dead_spots(d, w=5e6):
 
 for sp, d in D.items():
     if sp == "paradoxa":
-        guarded("structure %s" % sp, lambda d=d: structure(d))
+        guarded("structure %s" % sp, lambda sp=sp, d=d: structure(sp, d))
     if "co" in d:
         guarded("dead spots %s" % sp, lambda d=d: dead_spots(d))
+
+
+def interference(d):
+    """Adjacent crossovers on one chromosome of one nucleus: their distance as a share of the chromosome,
+    against the same numbers of crossovers placed independently (no interference)."""
+    co, rng = d["co"], stream("interference", d["S"])
+    obs, groups = [], []
+    for (bc, c), x in co.groupby(["barcode", "chrom"]):
+        if len(x) >= 2:
+            obs += list(np.diff(np.sort(x.u.values)))
+            groups.append((c, len(x)))
+    pool = {c: co.u[co.chrom == c].values for c in d["main"]}
+    edges = np.linspace(0, 1, 11)
+    o = np.histogram(obs, bins=edges)[0].astype(float)
+    nulls = []
+    for _ in range(300):
+        dd = []
+        for c, k in groups:
+            dd += list(np.diff(np.sort(rng.choice(pool[c], k, replace=True))))
+        nulls.append(np.histogram(dd, bins=edges)[0])
+    nulls = np.array(nulls, float)
+    se = nulls[:, :2].sum(1)
+    d["intf"] = dict(edges=edges, obs=o, exp=nulls.mean(0), lo=np.percentile(nulls, 2.5, 0),
+                     hi=np.percentile(nulls, 97.5, 0), pairs=len(obs), short_obs=o[:2].sum(),
+                     short_exp=se.mean(), ratio=o[:2].sum() / max(se.mean(), 1e-9),
+                     ratio_lo=o[:2].sum() / max(np.percentile(se, 97.5), 1e-9),
+                     ratio_hi=o[:2].sum() / max(np.percentile(se, 2.5), 1e-9))
+
+
+for sp, d in D.items():
+    if "co" in d:
+        guarded("interference %s" % sp, lambda d=d: interference(d))
+
+
+# ============================================================ the review behind the settings
+def review(sp, d):
+    """The review of the calls (docs/co_review) and the scores of every setting against it (qc/co_review)."""
+    S, rv = d["S"], {}
+    c = CC.get(d["species"]) or {}
+    try:
+        rv["chosen"] = sid_of(c["base_af"], c["marker_num"], c["block_size"], c["terminal_marker_num"])
+    except (KeyError, TypeError, ValueError):
+        rv["chosen"] = None
+    a = str(c.get("_approved", ""))
+    rv["stamp_date"] = a.split("|")[0].strip()
+    p = "docs/co_review/%s_settings.tsv" % S
+    if have(p):
+        st = list(csv.DictReader(open(p), delimiter="\t"))
+        rv["n_settings"] = len(st)
+        rv["previous"] = next((r["id"] for r in st if r.get("label") == "current"), None)
+        rv["grid"] = {k: sorted({float(r[k]) for r in st}) for k in ("base_af", "marker_num", "block_size",
+                                                                      "terminal_marker_num")}
+    p = "docs/co_review/%s_events.tsv.gz" % S
+    if have(p):
+        with gzip.open(p, "rt") as fh:
+            ev = list(csv.DictReader(fh, delimiter="\t"))
+        rv["page_events"] = len(ev)
+        rv["page_cells"] = len({e["barcode"] for e in ev})
+    p = "docs/co_review/%s_verdicts.csv" % S
+    if have(p):
+        lines = open(p).read().splitlines()
+        head = [l for l in lines if l.startswith("#")]
+        m = re.search(r"page (\w+)", head[0]) if head else None
+        rv["page"] = m.group(1) if m else "?"
+        rv["notes"] = head[1:]
+        rows = list(csv.DictReader(l for l in lines if not l.startswith("#")))
+        ev = [r for r in rows if r["type"] == "event"]
+        masked = {(r["barcode"], r["chrom"]) for r in rows if r["type"] == "mask" and r["verdict"] == "masked"}
+        bad = {r["barcode"] for r in rows if r["type"] == "cell" and r["verdict"] == "bad"}
+        out = [r for r in ev if (r["barcode"], r["chrom"]) in masked or r["barcode"] in bad]
+        sc = [r for r in ev if not ((r["barcode"], r["chrom"]) in masked or r["barcode"] in bad)]
+        rv["events"] = len(ev)
+        rv["cells"] = len({r["barcode"] for r in ev} | {r["barcode"] for r in rows if r["type"] == "missed"})
+        rv["eye"] = collections.Counter(r["verdict"] for r in sc if r["source"] == "user" and r["verdict"])
+        rv["auto"] = collections.Counter(r["verdict"] for r in sc if r["source"] == "auto" and r["verdict"])
+        rv["none"] = sum(1 for r in sc if not r["verdict"])
+        rv["on_masked"] = len(out)
+        rv["masked_seqs"] = len(masked)
+        rv["missed"] = sum(1 for r in rows if r["type"] == "missed")
+        rv["bad_cells"] = len(bad)
+    ps = "qc/co_review/%s/scores.tsv" % S
+    if have(ps):
+        t = pd.read_csv(ps, sep="\t").drop_duplicates("setting")
+        t["par"] = t.setting.map(sid_parse)
+        rv["scores"] = t.set_index("setting", drop=False)
+        rv["scores_time"] = datetime.datetime.fromtimestamp(os.path.getmtime(ps)).strftime("%Y-%m-%d %H:%M")
+        src = t["source"].value_counts().to_dict() if "source" in t else {}
+        rv["mode"] = ("every setting re-called from the pipeline's tables (score_verdicts.py --recall_all)"
+                      if src and set(src) == {"re-called"} else
+                      "the page's own calls for the %s swept settings; %s outside the sweep re-called"
+                      % (fi(src.get("sweep", 0)), fi(src.get("re-called", 0))))
+    p = "qc/co_review/%s/scores.txt" % S
+    if have(p):
+        t = open(p).read()
+        m = re.search(r"^RE-CALLED\s+(.*)$", t, re.M)
+        rv["recalled"] = m.group(1).strip() if m else ""
+        m = re.search(r"without the molecules in (.*?);", rv["recalled"])
+        rv["recall_excl"] = m.group(1) if m else ""
+        m = re.search(r"^table:\s*(\S+)", t, re.M)
+        if m and os.path.realpath(m.group(1)) != os.path.realpath(ps):
+            WARN.append("%s: %s was written with %s, not with the table this report reads (%s)" % (S, p, m.group(1), ps))
+        m = re.search(r"^VERDICTS\s+.*?: (\d+) events in (\d+) (?:reviewed )?cells", t, re.M)
+        if m and "events" in rv and (int(m.group(1)), int(m.group(2))) != (rv["events"], rv["cells"]):
+            WARN.append("%s: %s scored %s events in %s nuclei, the verdicts file has %s in %s: scores from other "
+                        "verdicts?" % (S, p, m.group(1), m.group(2), rv["events"], rv["cells"]))
+    d["rv"] = rv
+
+
+for sp, d in D.items():
+    guarded("review %s" % sp, lambda sp=sp, d=d: review(sp, d))
+
+
+def score_row(d, sid):
+    t = d.get("rv", {}).get("scores")
+    return t.loc[sid] if t is not None and sid in t.index else None
+
 
 # =================================================================== numbers out
 for sp, d in D.items():
@@ -700,15 +1138,16 @@ for sp, d in D.items():
               "gap_max_mb", "gap_1mb_share", "good_in_genes", "rdna_bp", "rdna_markers_est", "raw_k",
               "raw_share_cand", "raw_share_dp_low", "raw_share_dp_high", "raw_share_qual_fail", "raw_share_ab_fail",
               "raw_share_pass", "pair_sim_median", "dup_pairs", "dup_cells", "distinct_genotypes", "called_share",
-              "ncell_co", "co_total", "co_mean", "co_sd", "co_median", "co_mean_nj", "below_obligate",
-              "width_median_kb", "U_markers", "U_genes", "join_cos", "at_join_cos", "at_join_exp", "rho_markers", "window_mean", "shape", "shape_nj",
-              "asm2n", "rdna_base", "rdna_45s_n", "rdna_45s_complete", "rdna_n_arrays", "rdna_n_trust", "dead_mb"):
+              "ncell_co", "co_total", "co_mean", "co_sd", "co_median", "map_cm", "below_obligate", "below_obligate_exp", "masked_calls",
+              "width_median_kb", "U_markers", "U_genes", "rho_markers", "window_mean", "shape", "asm2n", "dead_mb",
+              "phi_nuclei", "fw_thr", "excl_dropped", "link_groups"):
         if k in d:
             put(sp, k, d[k])
-    for lab in ("land", "land_nj"):
-        if lab in d:
-            for k in ("U", "U_lo", "U_hi"):
-                put(sp, "%s.%s" % (lab, k), d[lab][k])
+    if "dup_chance" in d:
+        put(sp, "dup_pairs_chance", "%.1f (95%% %.0f–%.0f), p %.3g" % (d["dup_chance"] + (d["dup_p"],)))
+    if "land" in d:
+        for k in ("U", "U_lo", "U_hi"):
+            put(sp, "land.%s" % k, d["land"][k])
     for k, v in d.get("classes", {}).items():
         put(sp, "marker_class_" + k, v)
     if "bs" in d:
@@ -730,8 +1169,15 @@ for sp, d in D.items():
         b = d["bs"][d["bs"].barcode.isin(d["cells"])]
         d["umi_med"] = put(sp, "selected_umi_median", b.total_umi.median())
         d["genes_med"] = put(sp, "selected_genes_median", b.n_genes.median())
+    for s, v in d.get("per_seq", {}).items():
+        put(sp, "cos_per_nucleus.%s" % s, v)
+        put(sp, "nuclei_counting.%s" % s, d["nseq_used"][s])
     for c, v in d.get("per_chrom", {}).items():
-        put(sp, "cos_per_grain." + c, v)
+        put(sp, "cos_per_grain_chromosome.%s" % c, v)
+    if "masks" in d:
+        for k, v in d["masks"]["class"].value_counts().items():
+            put(sp, "dosage_class." + k, v)
+        put(sp, "dosage_masked_pairs", len(d.get("masked_pairs", ())))
     if "dead" in d:
         put(sp, "dead_spots", len(d["dead"]))
         put(sp, "dead_spots_chance", "%.1f (95%% %.0f–%.0f)" % d["dead_chance"])
@@ -740,9 +1186,29 @@ for sp, d in D.items():
             put(sp, "dead.%s:%s" % (r[0], r[1]), "%s Mb, inv %s%%, transl %s%%, no homolog %s%%, markers %s, %s"
                 % (r[2], r[3], r[4], r[5], r[6], r[8]))
     for r in d.get("busiest", []):
-        put(sp, "busiest_5mb.%s:%s" % (r[0], r[1]), "%d crossovers, p %s%s" % (r[2], r[4], ", near join" if r[5] else ""))
-    for r in [r for r in d.get("rdna_rows", []) if r[9] or r[6]][:12]:
-        put(sp, "rdna_fold.%s:%s" % (r[0], r[1]), "%s %s reads %d fold %.0f %s" % (r[2], r[3], r[4], r[5], r[6]))
+        put(sp, "busiest_5mb.%s:%s" % (r[0], r[1]), "%d crossovers, p %s" % (r[2], r[4]))
+    if "intf" in d:
+        f = d["intf"]
+        put(sp, "interference_pairs", f["pairs"])
+        put(sp, "interference_short_ratio", "%.2f (null range %.2f–%.2f)" % (f["ratio"], f["ratio_lo"], f["ratio_hi"]))
+    for r in d.get("co_pairs", []):
+        put(sp, "cosegregating.%s|%s" % (r["a"], r["b"]), "phi %+.2f at %.0f / %.0f Mb, %d nuclei, chance %.2f, p %.3g; %s"
+            % (r["phi"], r["wa"][0], r["wb"][0], r["n"], r["chance"], r["p"], r["why"]))
+    for c, x, a, b in d.get("cut_gaps", []):
+        put(sp, "cut.%s:%.3f_Mb" % (c, x / 1e6), "no good marker over %.0f kb (%.3f-%.3f Mb)" % ((b - a) / 1e3, a / 1e6,
+                                                                                               b / 1e6))
+    rv = d.get("rv", {})
+    for k in ("chosen", "previous", "page", "events", "cells", "none", "on_masked", "missed", "n_settings"):
+        if k in rv:
+            put(sp, "review." + k, rv[k])
+    for k in ("eye", "auto"):
+        for v, n_ in rv.get(k, {}).items():
+            put(sp, "review.%s_%s" % (k, v), n_)
+    for lab in ("chosen", "previous"):
+        r = score_row(d, rv.get(lab))
+        if r is not None:
+            put(sp, "score_%s" % lab, "%s F1 %.4f (%.4f-%.4f) TP %d FP %d FN %d calls/cell %.2f %s"
+                % (r.setting, r.F1, r.F1_lo, r.F1_hi, r.TP, r.FP, r.FN, r.cos_per_cell, r.source))
 
 # ======================================================================== figures
 
@@ -754,7 +1220,8 @@ def save(fig, name):
     return p
 
 
-FIGS = {}
+def cut_txt(d, c):
+    return " | ".join(label(d, s).split(" ", 1)[-1] for s in pieces_of(d, c)) if len(pieces_of(d, c)) > 1 else ""
 
 
 def fig_markers():
@@ -768,13 +1235,17 @@ def fig_markers():
             if i % 2:
                 ax.axvspan(off / 1e6, (off + d["L"][c]) / 1e6, color="#F1EFE8", lw=0)
             ax.plot(off / 1e6 + (np.arange(k) + 0.5) * 2, h, color=COL[sp], lw=0.8)
-            ax.text((off + d["L"][c] / 2) / 1e6, -0.08, re.sub(r"_hap\d", "", c).replace("chr", ""),
+            for x in d["cuts"].get(c, []):
+                ax.axvline((off + x) / 1e6, color="#2C2C2A", lw=0.7, ls=":")
+            ax.text((off + d["L"][c] / 2) / 1e6, -0.08, short(c).replace("chr", ""),
                     transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=7)
             off += d["L"][c]
         ax.set_xlim(0, off / 1e6)
         ax.set_xticks([])
         ax.set_ylabel("good markers / Mb")
-        ax.set_title("%s (%s): %s good markers" % (NAME[sp], d["S"], fi(d.get("good_n"))), loc="left", fontsize=9)
+        ax.set_title("%s (%s): %s good markers%s" % (NAME[sp], d["S"], fi(d.get("good_n")),
+                                                    "; dotted = cuts of the crossover reference" if d["pieces"] else ""),
+                     loc="left", fontsize=9)
     fig.tight_layout()
     return save(fig, "fig_markers_along_genome.png")
 
@@ -858,14 +1329,10 @@ def fig_per_grain():
     for ax, (sp, d) in zip(axs, D.items()):
         v = d["per"].n_cos.values
         bins = np.arange(-0.5, v.max() + 1.5, 1)
-        ax.hist(v, bins=bins, color=COL[sp], alpha=0.85, label="as called")
-        if "per_nj" in d:
-            ax.hist(d["per_nj"], bins=bins, histtype="step", color="#D85A30", lw=1.5,
-                    label="without crossovers at the joins")
-            ax.legend(frameon=False, fontsize=7, loc="upper right")
+        ax.hist(v, bins=bins, color=COL[sp], alpha=0.85)
         ax.axvline(d["n"] / 2, color="#444441", ls="--", lw=1)
-        ax.text(d["n"] / 2, ax.get_ylim()[1] * 0.97, " obligate minimum %s" % ff(d["n"] / 2), fontsize=7, va="top")
-        ax.set_xlabel("crossovers per pollen grain")
+        ax.set_xlabel("crossovers per pollen grain (dashed: n/2 = %s, one crossover per bivalent on average)"
+                      % ff(d["n"] / 2), fontsize=8)
         ax.set_ylabel("grains")
         ax.set_title("%s: %s grains, mean %s" % (NAME[sp], fi(len(v)), ff(v.mean(), 2)), loc="left")
     fig.tight_layout()
@@ -879,63 +1346,42 @@ def fig_landscape():
         L = d["land"]
         ax.fill_between(x, L["lo"], L["hi"], color=COL[sp], alpha=0.18, lw=0)
         ax.plot(x, L["prof"], color=COL[sp], lw=2, label="crossovers (95% CI over grains)")
-        if "land_nj" in d:
-            ax.plot(x, d["land_nj"]["prof"], color=COL[sp], lw=1.2, ls=":", label="without the join crossovers")
         if "mprof" in d:
             ax.plot(x, d["mprof"], color="#888780", lw=1.2, label="good markers")
         if "gprof" in d:
             ax.plot(x, d["gprof"], color="#888780", lw=1, ls="--", label="genes")
         ax.axhline(1, color="#D3D1C7", lw=0.8)
         ax.set_xlabel("position along chromosome (% of length, all chromosomes pooled)")
-        ax.set_title(NAME[sp], loc="left")
-        ax.text(0.02, 0.97, HEAD[sp], transform=ax.transAxes, va="top", fontsize=7.5, color=COL[sp])
-        ax.legend(frameon=False, fontsize=7, loc="upper right")
+        ax.set_title("%s: %s" % (NAME[sp], HEAD[sp]), loc="left", fontsize=8.5, color=COL[sp])
+        ax.legend(frameon=False, fontsize=7, loc="upper center")
     axs[0].set_ylabel("density relative to the mean")
     fig.tight_layout()
     return save(fig, "fig_landscape_relative.png")
 
 
 def fig_per_chrom():
-    fig, axs = plt.subplots(1, 2, figsize=(10, 3.4), gridspec_kw={"width_ratios": [len(D[s]["main"]) for s in D]})
+    fig, axs = plt.subplots(1, 2, figsize=(10, 3.6), gridspec_kw={"width_ratios": [max(len(D[s]["main"]), 7) for s in D]})
     for ax, (sp, d) in zip(axs, D.items()):
         cs = sorted(d["main"], key=lambda c: d["L"][c])
-        ax.bar(range(len(cs)), [d["per_chrom"][c] for c in cs], color=COL[sp])
+        for i, c in enumerate(cs):
+            bottom = 0.0
+            pcs = pieces_of(d, c)
+            for k, s in enumerate(pcs):
+                v = d["per_seq"][s]
+                ax.bar(i, v, bottom=bottom, color=COL[sp], alpha=1.0 if k % 2 == 0 else 0.55, edgecolor="white", lw=0.6)
+                if len(pcs) > 1 and v > 0.15:
+                    ax.text(i, bottom + v / 2, label(d, s).split(" ", 1)[-1], ha="center", va="center", fontsize=6,
+                            color="white")
+                bottom += v
         ax.axhline(0.5, color="#444441", ls="--", lw=1)
         ax.set_xticks(range(len(cs)))
-        ax.set_xticklabels(["%s\n%.0f" % (re.sub(r"_hap\d", "", c).replace("chr", ""), d["L"][c] / 1e6) for c in cs],
-                           fontsize=6)
+        ax.set_xticklabels(["%s\n%.0f" % (short(c).replace("chr", ""), d["L"][c] / 1e6) for c in cs], fontsize=6)
         ax.set_xlabel("chromosome (length, Mb), shortest to longest")
-        ax.set_title("%s: crossovers per grain per chromosome" % NAME[sp], loc="left")
+        ax.set_title("%s: crossovers per grain per chromosome%s" % (NAME[sp], "\n(its pieces stacked; each "
+                     "per nucleus that counts for it)" if d["pieces"] else ""), loc="left", fontsize=9)
     axs[0].set_ylabel("mean crossovers per grain")
     fig.tight_layout()
     return save(fig, "fig_crossovers_per_chromosome.png")
-
-
-def interference(d):
-    """Adjacent crossovers on one chromosome of one nucleus: their distance as a share of the chromosome,
-    against the same numbers of crossovers placed independently (no interference)."""
-    co = d["co"][~d["co"].near_join]
-    obs, groups = [], []
-    for (bc, c), x in co.groupby(["barcode", "chrom"]):
-        if len(x) >= 2:
-            obs += list(np.diff(np.sort(x.u.values)))
-            groups.append((c, len(x)))
-    pool = {c: co.u[co.chrom == c].values for c in d["main"]}
-    edges = np.linspace(0, 1, 11)
-    o = np.histogram(obs, bins=edges)[0].astype(float)
-    nulls = []
-    for _ in range(300):
-        dd = []
-        for c, k in groups:
-            dd += list(np.diff(np.sort(rng.choice(pool[c], k, replace=True))))
-        nulls.append(np.histogram(dd, bins=edges)[0])
-    nulls = np.array(nulls, float)
-    se = nulls[:, :2].sum(1)
-    d["intf"] = dict(edges=edges, obs=o, exp=nulls.mean(0), lo=np.percentile(nulls, 2.5, 0),
-                     hi=np.percentile(nulls, 97.5, 0), pairs=len(obs), short_obs=o[:2].sum(),
-                     short_exp=se.mean(), ratio=o[:2].sum() / max(se.mean(), 1e-9),
-                     ratio_lo=o[:2].sum() / max(np.percentile(se, 97.5), 1e-9),
-                     ratio_hi=o[:2].sum() / max(np.percentile(se, 2.5), 1e-9))
 
 
 def fig_interference():
@@ -957,60 +1403,185 @@ def fig_interference():
     return save(fig, "fig_interference.png")
 
 
-def fig_diagram():
-    pairs = PAIRS
-    rr = {k: v for k, v in pairs}
-    L2n = Pd.get("L2n", {})
-    jpos = {"chr1_hap1": 262.9, "chr2_hap2": 215.0, "chr1_hap2": 262.0, "chr2_hap1": 211.0}
-    chrs = [("A", "chr1_hap1", "L1", "P"), ("C", "chr1_hap2", "L1", "Q"),
-            ("B", "chr2_hap1", "L2", "P"), ("D", "chr2_hap2", "L2", "Q")]
-    fig, axs = plt.subplots(1, 2, figsize=(11, 3.6), gridspec_kw={"width_ratios": [1.15, 1]})
-    ax = axs[0]
-    scale = 1 / 480.0
-    for i, (nm, c, left, right) in enumerate(chrs):
-        y = 3.2 - i * 0.95
-        tot = L2n.get(c, 0) / 1e6 or (jpos[c] + 120)
-        j = jpos[c]
-        for x0, w, arm in ((0, j, left), (j, tot - j, right)):
-            ax.add_patch(FancyBboxPatch((0.18 + x0 * scale, y), w * scale - 0.005, 0.42,
-                                        boxstyle="round,pad=0,rounding_size=0.06", fc=ARM[arm], ec="none"))
-            ax.text(0.18 + (x0 + w / 2) * scale, y + 0.21, arm, ha="center", va="center", fontsize=10,
-                    fontweight="bold", color="#2C2C2A")
-        ax.text(0.0, y + 0.21, "%s  %s" % (nm, c), ha="left", va="center", fontsize=8)
-        ax.text(0.18 + tot * scale + 0.02, y + 0.21, "%.0f Mb" % tot, va="center", fontsize=7, color="#5F5E5A")
-    ax.set_xlim(-0.05, 1.35)
-    ax.set_ylim(0.1, 3.85)
-    ax.axis("off")
-    ax.set_title("In the plant's tissue (assembly + Hi-C): four chromosomes", loc="left", fontsize=9)
-    ax = axs[1]
-    ax.axis("off")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_title("In the pollen: which arms are inherited together", loc="left", fontsize=9)
+PARS = [(1, "marker_num\n(molecules a block needs)"), (2, "block_size, Mb\n(shortest interior block)"),
+        (3, "terminal_marker_num\n(molecules a chromosome-end block needs)"), (0, "base_af\n(smoothing threshold)")]
 
-    def r_of(prefix):
-        for k, v in rr.items():
-            if k.startswith(prefix):
-                return v
+
+def fig_review():
+    fig, axs = plt.subplots(1, 4, figsize=(12.5, 3.6), sharey=True)
+    ymin, drawn = 1.0, 0
+    for sp, d in D.items():
+        rv = d.get("rv", {})
+        t, ch = rv.get("scores"), sid_parse(rv.get("chosen"))
+        if t is None or ch is None or score_row(d, rv.get("chosen")) is None:
+            continue
+        prev = score_row(d, rv.get("previous"))
+        for ax, (k, lab) in zip(axs, PARS):
+            m = [p is not None and all(p[i] == ch[i] for i in range(4) if i != k) for p in t.par]
+            sl = t[m].copy()
+            if not len(sl):
+                continue
+            sl["x"] = [p[k] for p in sl.par]
+            sl = sl.sort_values("x")
+            x, y = sl.x.values, sl.F1.values
+            ax.plot(x, y, color=COL[sp], lw=1.2, zorder=2)
+            ax.vlines(x, sl.F1_lo.values, sl.F1_hi.values, color=COL[sp], lw=0.8, alpha=0.6, zorder=1)
+            un = sl.unreviewed_calls.values if "unreviewed_calls" in sl else np.zeros(len(sl))
+            ax.scatter(x[un == 0], y[un == 0], s=18, color=COL[sp], zorder=3)
+            ax.scatter(x[un > 0], y[un > 0], s=18, facecolor="white", edgecolor=COL[sp], zorder=3)
+            for xx, yy, uu in zip(x, y, un):
+                if uu > 0:
+                    ax.annotate("+%d" % uu, (xx, yy), xytext=(3, -9), textcoords="offset points", fontsize=6,
+                                color=COL[sp])
+            ax.scatter([ch[k]], [score_row(d, rv["chosen"]).F1], s=70, facecolor=COL[sp], edgecolor="#2C2C2A",
+                       lw=1.2, zorder=4)
+            if prev is not None:
+                ax.axhline(prev.F1, color=COL[sp], lw=0.9, ls="--", alpha=0.8)
+            ymin = min(ymin, float(np.nanmin(sl.F1_lo.values)), float(prev.F1) if prev is not None else 1.0)
+            ax.set_xlabel(lab, fontsize=8)
+            ax._xs = sorted(set(x) | set(getattr(ax, "_xs", [])))
+            drawn += 1
+    if not drawn:
+        plt.close(fig)
         return None
-    lines = [("L1", "Q", r_of("L1 end    vs Q start")), ("L2", "P", r_of("L2 end    vs P start")),
-             ("L1", "P", r_of("L1 end    vs P start")), ("L2", "Q", r_of("L2 end    vs Q start"))]
-    for i, (a, b, r) in enumerate(lines):
-        y = 0.82 - i * 0.2
-        for k, arm in enumerate((a, b)):
-            ax.add_patch(FancyBboxPatch((0.03 + k * 0.13, y - 0.06), 0.11, 0.12,
-                                        boxstyle="round,pad=0,rounding_size=0.02", fc=ARM[arm], ec="none"))
-            ax.text(0.085 + k * 0.13, y, arm, ha="center", va="center", fontsize=10, fontweight="bold")
-        if r:
-            together = float(r[5]) < 0.15
-            ax.text(0.31, y, "r = %s over %s nuclei: %s" % (r[5], r[4], "inherited together" if together
-                                                            else "inherited independently"),
-                    va="center", fontsize=8.5, color="#2C2C2A" if together else "#A32D2D")
-    ax.text(0.03, 0.02, "r = share of nuclei whose two windows disagree (0 together, 0.5 independent).\n"
-            "The pollen behave as if L1 were joined to Q and L2 to P, in both homologs.",
-            fontsize=7.5, color="#5F5E5A", va="bottom")
+    for ax in axs:
+        ax.set_xticks(getattr(ax, "_xs", []))
+        ax.set_xticklabels(["%g" % v for v in getattr(ax, "_xs", [])], fontsize=7)
+        ax.set_ylim(max(0.0, ymin - 0.02), 1.0)
+        ax.grid(axis="y", color="#F1EFE8", lw=0.8)
+    axs[0].set_ylabel("F1 against the review (95% CI)")
+    handles = [plt.Line2D([0], [0], color=COL[sp], marker="o", lw=1.2, label=NAME[sp]) for sp in D] + [
+        plt.Line2D([0], [0], color="#2C2C2A", marker="o", mfc="#888780", lw=0, ms=8, label="chosen settings"),
+        plt.Line2D([0], [0], color="#888780", ls="--", lw=0.9, label="previous settings (all four as before)"),
+        plt.Line2D([0], [0], color="#888780", marker="o", mfc="white", lw=0,
+                   label="+n: calls that match no reviewed event (not scored)")]
+    fig.legend(handles=handles, loc="lower center", ncol=5, fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, -0.06))
+    fig.suptitle("Each setting moved away from the chosen value with the other three held, scored against the review's "
+                 "verdicts", x=0.01, ha="left", fontsize=9)
+    fig.tight_layout(rect=(0, 0.04, 1, 0.95))
+    return save(fig, "fig_settings_from_review.png")
+
+
+def fig_pairs():
+    sps = [sp for sp in D if "pair_obs" in D[sp]]
+    if not sps:
+        return None
+    fig, axs = plt.subplots(1, len(sps), figsize=(6.3 * len(sps), 6.1))
+    axs = np.atleast_1d(axs)
+    for ax, sp in zip(axs, sps):
+        d = D[sp]
+        M = d["pair_obs"]
+        labs = [label(d, s) for s in d["seqs"]]
+        n = len(labs)
+        im = ax.imshow(np.ma.masked_invalid(np.where(M > d["fw_thr"], M, np.nan)), cmap=CMAP[sp], vmin=0, vmax=1,
+                       interpolation="nearest")
+        for i in range(n):
+            ax.add_patch(plt.Rectangle((i - 0.5, i - 0.5), 1, 1, color="#B4B2A9", lw=0))
+            for j in range(n):
+                if i != j and np.isfinite(M[i, j]) and M[i, j] > d["fw_thr"]:
+                    ax.text(j, i, "%.2f" % M[i, j], ha="center", va="center", fontsize=6.5 if n > 10 else 8,
+                            color="white" if M[i, j] > 0.55 else "#2C2C2A")
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(labs, rotation=90, fontsize=7)
+        ax.set_yticklabels(labs, fontsize=7)
+        ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
+        ax.grid(which="minor", color="white", lw=1.2)
+        ax.tick_params(which="minor", length=0)
+        for s_ in ax.spines.values():
+            s_.set_visible(False)
+        ax.set_title("%s: %d %s, %s nuclei\ncoloured: above chance (|φ| > %s, which no pair reaches in 95%% of %d "
+                     "shuffles); pale: not" % (NAME[sp], n, "pieces of %d chromosomes" % len(d["main"]) if d["pieces"]
+                                               else "chromosomes", fi(d["phi_nuclei"]), ff(d["fw_thr"], 2), NPERM),
+                     loc="left", fontsize=8.5)
+        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
+        cb.set_label("strongest |φ| between their %g Mb windows (pairs above chance)" % WIN_MB, fontsize=7)
     fig.tight_layout()
-    return save(fig, "fig_arm_diagram.png")
+    return save(fig, "fig_cosegregation_pairs.png")
+
+
+def fig_phi_maps():
+    sps = [sp for sp in D if "phi" in D[sp]]
+    if not sps:
+        return None
+    fig, axs = plt.subplots(1, len(sps), figsize=(6.8 * len(sps), 7.0))
+    axs = np.atleast_1d(axs)
+    for ax, sp in zip(axs, sps):
+        d = D[sp]
+        P = np.abs(d["phi"]).copy()
+        np.fill_diagonal(P, np.nan)
+        nw = [d["nwin"][s] for s in d["seqs"]]
+        ax.imshow(np.ma.masked_invalid(P), cmap=CMAP[sp], vmin=0, vmax=1, interpolation="nearest")
+        edges = np.cumsum([0] + nw) - 0.5
+        for k, e in enumerate(edges[1:-1]):
+            same = d["src"][d["seqs"][k]][0] == d["src"][d["seqs"][k + 1]][0]
+            for f_ in (ax.axhline, ax.axvline):
+                f_(e, color="#2C2C2A" if same else "#888780", lw=0.7 if same else 0.4, ls=":" if same else "-")
+        mids = (edges[:-1] + edges[1:]) / 2
+        ax.set_xticks(mids)
+        ax.set_xticklabels([label(d, s) for s in d["seqs"]], rotation=90, fontsize=6.5)
+        ax.set_yticks(mids)
+        ax.set_yticklabels([label(d, s) for s in d["seqs"]], fontsize=6.5)
+        for s_ in ax.spines.values():
+            s_.set_visible(False)
+        ax.set_title("%s: every two %g Mb windows, %s nuclei%s" % (NAME[sp], WIN_MB, fi(d["phi_nuclei"]),
+                     "\n(dotted: a cut between pieces of one chromosome)" if d["pieces"] else ""), loc="left", fontsize=9)
+    fig.suptitle("Pollen co-segregation along the genome: |φ| between window genotypes (white 0, independent; dark 1, "
+                 "always inherited together; grey: too few nuclei)", x=0.01, ha="left", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return save(fig, "fig_cosegregation_windows.png")
+
+
+def chrom_windows(d, c):
+    """The window indices of chromosome c (its pieces in order) and their edges on the chromosome, Mb."""
+    W = WIN_MB * 1e6
+    idx, edges = [], [0.0]
+    for s in pieces_of(d, c):
+        o, k = d["src"][s][1], d["nwin"][s]
+        for i in range(k):
+            idx.append(d["widx"][(s, i)])
+            edges.append((o + (i + 1) * W if i < k - 1 else o + d["Ls"][s]) / 1e6)
+    return idx, np.array(edges)
+
+
+def zoom_pairs(d):
+    """Chromosome pairs with sequences inherited together above chance (not one chromosome): unexplained first."""
+    out = {}
+    for r in d.get("co_pairs", []):
+        ca, cb = d["src"][r["a"]][0], d["src"][r["b"]][0]
+        if ca == cb:
+            continue
+        k = tuple(sorted((ca, cb), key=natural))
+        if k not in out or r["absphi"] > out[k]["absphi"]:
+            out[k] = r
+    return sorted(out.items(), key=lambda kv: (kv[1]["explained"], -kv[1]["absphi"]))[:2]
+
+
+def fig_phi_zoom():
+    panels = [(sp, k, r) for sp in D if "phi" in D[sp] for k, r in zoom_pairs(D[sp])]
+    if not panels:
+        return None
+    fig, axs = plt.subplots(1, len(panels), figsize=(6.4 * len(panels), 5.8))
+    axs = np.atleast_1d(axs)
+    for ax, (sp, (c1, c2), r) in zip(axs, panels):
+        d = D[sp]
+        i1, e1 = chrom_windows(d, c1)
+        i2, e2 = chrom_windows(d, c2)
+        M = np.abs(d["phi"][np.ix_(i1, i2)])
+        ax.pcolormesh(e2, e1, np.ma.masked_invalid(M), cmap=CMAP[sp], vmin=0, vmax=1)
+        ax.set_xlim(0, e2[-1])
+        ax.set_ylim(e1[-1], 0)
+        for x in d["cuts"].get(c2, []):
+            ax.axvline(x / 1e6, color="#2C2C2A", lw=0.9, ls=":")
+        for y in d["cuts"].get(c1, []):
+            ax.axhline(y / 1e6, color="#2C2C2A", lw=0.9, ls=":")
+        ax.set_xlabel("%s, Mb%s" % (c2, " (dotted: cut %s)" % cut_txt(d, c2) if cut_txt(d, c2) else ""))
+        ax.set_ylabel("%s, Mb%s" % (c1, " (dotted: cut %s)" % cut_txt(d, c1) if cut_txt(d, c1) else ""))
+        ax.set_title("%s %s × %s: strongest |φ| %s\n%s" % (NAME[sp], short(c1), short(c2), ff(r["absphi"], 2), r["why"]),
+                     loc="left", fontsize=8.5)
+    fig.tight_layout()
+    return save(fig, "fig_cosegregation_zoom.png")
 
 
 def hic_agg(M, chroms, bin_bp, lens, order, agg_bp):
@@ -1035,7 +1606,7 @@ def hic_agg(M, chroms, bin_bp, lens, order, agg_bp):
     return np.add.reduceat(np.add.reduceat(Ms, starts, axis=0), starts, axis=1), nper, f * bin_bp
 
 
-def draw_hic(ax, H, nper, order, agg_bp, short=True):
+def draw_hic(ax, H, nper, order, agg_bp, d, short_names=True):
     """Contacts on a log scale, white to red: white = the typical contact between two different chromosomes,
     red = the diagonal. A chromosome is a red square; a misjoin would break a square or put red off the diagonal."""
     lab = np.repeat(np.arange(len(nper)), nper)
@@ -1050,35 +1621,36 @@ def draw_hic(ax, H, nper, order, agg_bp, short=True):
     for e in edges[1:-1]:
         ax.axhline(e, color="#888780", lw=0.4)
         ax.axvline(e, color="#888780", lw=0.4)
-    names = [(c.replace("_hap", " h") if short else c) for c in order]
+    names = [(c.replace("_hap", " h") if short_names else c) for c in order]
     ax.set_xticks((edges[:-1] + edges[1:]) / 2)
     ax.set_xticklabels(names, rotation=90, fontsize=6)
     ax.set_yticks((edges[:-1] + edges[1:]) / 2)
     ax.set_yticklabels(names, fontsize=6)
-    arm_strips(ax, order, edges, tot)
+    for i, c in enumerate(order):        # the cuts of the crossover reference, on the chromosomes it was cut from
+        if d["cuts"].get(c) and d.get("L2n", {}).get(c) == d["L"].get(c):
+            for x in d["cuts"][c]:
+                p_ = edges[i] + x / 1e6
+                ax.plot([p_, p_], [0, tot], color="#2C2C2A", lw=0.6, ls=":")
+                ax.plot([0, tot], [p_, p_], color="#2C2C2A", lw=0.6, ls=":")
+    ax.set_xlim(0, tot)
+    ax.set_ylim(tot, 0)
     return im
 
 
-def arm_strips(ax, order, edges, tot, line="#2C2C2A"):
-    """Arm colours of the chr1/chr2 translocation along the top and left of a chromosome-by-chromosome map."""
-    band = tot * 0.018
-    for i, c in enumerate(order):
-        spans = [(0, ARMSPAN[c][0], ARMSPAN[c][1]), (ARMSPAN[c][0], edges[i + 1] - edges[i], ARMSPAN[c][2])] \
-            if c in ARMSPAN else [(0, edges[i + 1] - edges[i], None)]
-        for a, b, arm in spans:
-            col = ARM[arm] if arm else "#E9E7E0"
-            ax.add_patch(plt.Rectangle((edges[i] + a, -2.2 * band), b - a, band, color=col, clip_on=False, lw=0))
-            ax.add_patch(plt.Rectangle((-2.2 * band, edges[i] + a), band, b - a, color=col, clip_on=False, lw=0))
-            if arm and b - a > tot * 0.03:
-                ax.text(edges[i] + (a + b) / 2, -1.7 * band, arm, ha="center", va="center", fontsize=6)
-        if c in ARMSPAN:
-            x = edges[i] + ARMSPAN[c][0]
-            ax.plot([x, x], [0, tot], color=line, lw=0.6, ls=":")
-            ax.plot([0, tot], [x, x], color=line, lw=0.6, ls=":")
-    ax.set_xlim(-2.4 * band, tot)
-    ax.set_ylim(tot, -2.4 * band)
-    for k in ("top", "right"):
-        ax.spines[k].set_visible(False)
+def hic_rank(H, nper, order):
+    """Contacts per bin pair between every two chromosome copies that are not homologs, against the median pair:
+    {(a, b): (x the median, rank)}, number of pairs."""
+    edges = np.cumsum([0] + list(nper))
+    dens = {}
+    for i in range(len(order)):
+        for j in range(i + 1, len(order)):
+            if short(order[i]) == short(order[j]):
+                continue
+            b = H[edges[i]:edges[i + 1], edges[j]:edges[j + 1]]
+            dens[(order[i], order[j])] = float(b.sum()) / max(b.size, 1)
+    med = float(np.median(list(dens.values()))) if dens else float("nan")
+    rk = sorted(dens, key=lambda k: -dens[k])
+    return {k: (v / med if med > 0 else float("nan"), rk.index(k) + 1) for k, v in dens.items()}, len(rk)
 
 
 def hic_load(sp, name):
@@ -1092,7 +1664,8 @@ def hic_load(sp, name):
 
 def fig_hic_dual(sp):
     """Hi-C on both haplotypes, all reads with MAPQ >= 1: reads that fit either copy of a sequence put contacts
-    between the copies, so homologous sequence shows as a red line off the diagonal."""
+    between the copies, so homologous sequence shows as a red line off the diagonal. Right: the chromosomes of
+    any pair inherited together that the assembly does not explain."""
     d = D[sp]
     got = hic_load(sp, "contacts_all.npz") or hic_load(sp, "contacts_unique.npz")
     if not got:
@@ -1100,68 +1673,39 @@ def fig_hic_dual(sp):
     M, chroms, bin_bp, p = got
     order = sorted([c for c in chroms if re.match(r"^chr\d+_hap[12]$", c)],
                    key=lambda c: (int(re.search(r"\d+", c).group()), c[-1]))
-    focus = [c for c in ("chr1_hap1", "chr1_hap2", "chr2_hap1", "chr2_hap2") if c in chroms]
+    base = sorted({short(d["src"][x][0]) for r in d.get("unexplained", []) for x in (r["a"], r["b"])}, key=natural)
+    focus = [c for c in order if short(c) in base]
     H1, n1, b1 = hic_agg(M, chroms, bin_bp, d["L2n"], order, 2e6)
-    H2, n2, b2 = hic_agg(M, chroms, bin_bp, d["L2n"], focus, 1e6)
+    H2 = None
+    if focus:
+        H2, n2, b2 = hic_agg(M, chroms, bin_bp, d["L2n"], focus, 1e6)
     del M
-    fig, axs = plt.subplots(1, 2, figsize=(15, 7.6), gridspec_kw={"width_ratios": [1.05, 1]})
-    im = draw_hic(axs[0], H1, n1, order, b1)
-    axs[0].set_title("all twelve chromosomes, hap1 next to hap2 (2 Mb bins)", loc="left", fontsize=9, pad=16)
-    draw_hic(axs[1], H2, n2, focus, b2, short=False)
-    axs[1].set_title("chr1 and chr2 only (1 Mb bins): A, C, B, D", loc="left", fontsize=9, pad=16)
-    cb = fig.colorbar(im, ax=axs, fraction=0.02, pad=0.01)
-    cb.set_label("log10 contacts (white = typical between two chromosomes)", fontsize=7)
-    fig.suptitle("%s Hi-C on both haplotypes (%s). Arm colours as in the diagram; dotted = joins" % (
-        NAME[sp], os.path.basename(p).replace(".npz", "")), x=0.01, ha="left", fontsize=9)
-    return save(fig, "fig_hic_both_haplotypes_%s.png" % sp)
-
-
-def fig_link_hic(sp):
-    d = D[sp]
-    S = d["S"]
-    rp, wp = "qc/linkage/%s/r_matrix.npy" % S, "qc/linkage/%s/windows.tsv" % S
-    if not (have(rp) and have(wp)):
-        return None
-    R = np.load(rp)
-    win = pd.read_csv(wp, sep="\t")
-    idx = [i for c in d["main"] for i in win.index[win.chrom == c]]
-    Rm = R[np.ix_(idx, idx)]
-    wsub = win.loc[idx].reset_index(drop=True)
-    got = hic_load(sp, "contacts_unique.npz")
-    H = None
-    if got:
-        M, chroms, bin_bp, p = got
-        if all(d["L2n"].get(c) == d["L"][c] for c in d["main"]) and all(c in chroms for c in d["main"]):
-            H, nper, aggb = hic_agg(M, chroms, bin_bp, d["L2n"], d["main"], 2e6)
-        else:
-            PROBLEMS.append(("Hi-C map %s" % sp, "reference chromosomes not in the 2n assembly with the same lengths"))
-        del M
-    ncol = 2 if H is not None else 1
-    fig, axs = plt.subplots(1, ncol, figsize=(6.6 * ncol, 6.6))
+    d["hic_rank"], d["hic_npairs"] = hic_rank(H1, n1, order)
+    d["hic_src"], d["hic_focus"], d["hic_rank_src"] = p, base, os.path.basename(p).replace(".npz", "")
+    pu = os.path.join(A.phd_root, "results", d["species"], "qc/hic_remap", "contacts_unique.npz")
+    if os.path.basename(p) != "contacts_unique.npz" and have_opt(pu):   # rank on uniquely mapped reads
+        z = np.load(pu)
+        Hu, nu, _ = hic_agg(z["M"], [str(x) for x in z["chroms"]], int(z["bin"]), d["L2n"], order, 2e6)
+        del z
+        d["hic_rank"], d["hic_npairs"] = hic_rank(Hu, nu, order)
+        d["hic_rank_src"] = "contacts_unique"
+    ncol = 2 if H2 is not None else 1
+    fig, axs = plt.subplots(1, ncol, figsize=(7.3 * ncol, 7.0), gridspec_kw={"width_ratios": [1.05, 1][:ncol]})
     axs = np.atleast_1d(axs)
-    nwin = [int((wsub.chrom == c).sum()) for c in d["main"]]
-    tot = sum(nwin) * WIN_MB
-    im = axs[0].imshow(np.clip(1 - 2 * Rm, 0, 1), cmap="Greens" if sp == "binata" else "Purples", vmin=0, vmax=1,
-                       interpolation="nearest", extent=(0, tot, tot, 0))
-    edges = np.cumsum([0] + nwin) * WIN_MB
-    for e in edges[1:-1]:
-        axs[0].axhline(e, color="#888780", lw=0.4)
-        axs[0].axvline(e, color="#888780", lw=0.4)
-    axs[0].set_xticks((edges[:-1] + edges[1:]) / 2)
-    axs[0].set_xticklabels(d["main"], rotation=90, fontsize=6)
-    axs[0].set_yticks((edges[:-1] + edges[1:]) / 2)
-    axs[0].set_yticklabels(d["main"], fontsize=6)
-    arm_strips(axs[0], d["main"], edges, tot)
-    axs[0].set_title("pollen linkage, %g Mb windows (1 − 2r; dark = inherited together)" % WIN_MB, loc="left",
-                     fontsize=9, pad=16)
-    if H is not None:
-        draw_hic(axs[1], H, nper, d["main"], aggb, short=False)
-        axs[1].set_title("Hi-C on this reference, MAPQ ≥ 30 (2 Mb bins; log, white = between chromosomes)",
-                         loc="left", fontsize=9, pad=16)
-    fig.suptitle("%s (%s): every chromosome%s" % (NAME[sp], S, "; arm colours as in the diagram, dotted = chr1/chr2 "
-                 "joins" if S in JOINS else ""), x=0.01, ha="left", fontsize=9)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    return save(fig, "fig_linkage_hic_%s.png" % sp)
+    fig.subplots_adjust(left=0.06, right=0.92, top=0.9, bottom=0.1, wspace=0.18)
+    im = draw_hic(axs[0], H1, n1, order, b1, d)
+    axs[0].set_title("all %d chromosome copies, hap1 next to hap2 (%g Mb bins)" % (len(order), b1 / 1e6), loc="left",
+                     fontsize=9)
+    if H2 is not None:
+        draw_hic(axs[1], H2, n2, focus, b2, d, short_names=False)
+        axs[1].set_title("%s only, both haplotypes (%g Mb bins)" % (" and ".join(base), b2 / 1e6), loc="left",
+                         fontsize=9)
+    cb = fig.colorbar(im, ax=list(axs), fraction=0.02, pad=0.01)
+    cb.set_label("log10 contacts (white = typical between two chromosomes)", fontsize=7)
+    fig.suptitle("%s Hi-C on both haplotypes (%s)%s" % (NAME[sp], os.path.basename(p).replace(".npz", ""),
+                 "; dotted = cuts of the crossover reference" if any(d["cuts"].values()) else ""),
+                 x=0.06, y=0.97, ha="left", fontsize=9)
+    return save(fig, "fig_hic_both_haplotypes_%s.png" % sp)
 
 
 def fig_chrom_landscapes():
@@ -1176,67 +1720,26 @@ def fig_chrom_landscapes():
             nb = int(math.ceil(d["L"][c] / 5e6))
             sub = d["co"][d["co"].chrom == c]
             cnt = np.bincount(np.minimum((sub.mid // 5e6).astype(int), nb - 1), minlength=nb)
-            ax.bar((np.arange(nb) + 0.5) * 5, 100.0 * cnt / d["ncell_co"] / 5, width=5, color=COL[sp], alpha=0.85)
+            ax.bar((np.arange(nb) + 0.5) * 5, 100.0 * cnt / bin_cells(d, c, nb, 5e6) / 5, width=5, color=COL[sp],
+                   alpha=0.85)
             pos = d["good"].pos[d["good"].chrom == c].values
             mk = np.bincount(np.minimum((pos // 5e6).astype(int), nb - 1), minlength=nb)
             ax2 = ax.twinx()
             ax2.plot((np.arange(nb) + 0.5) * 5, mk / 5, color="#888780", lw=0.8)
             ax2.set_yticks([])
             ax2.spines["right"].set_visible(False)
-            for _, jc, mb in JOINS.get(d["S"], []):
-                if jc == c:
-                    ax.axvline(mb, color="#D85A30", lw=0.8, ls=":")
-            ax.set_title("%s %s" % (NAME[sp].split()[1], c), fontsize=7, loc="left")
+            for x in d["cuts"].get(c, []):
+                ax.axvline(x / 1e6, color="#2C2C2A", lw=0.8, ls=":")
+            ax.set_title("%s %s%s" % (NAME[sp].split()[1], short(c), " (%s)" % cut_txt(d, c) if cut_txt(d, c) else ""),
+                         fontsize=7, loc="left")
             ax.tick_params(labelsize=6)
         for j in range(len(d["main"]), nr * ncol):
             axs[r0 + j // ncol, j % ncol].axis("off")
         r0 += nr
-    fig.text(0.0, 0.5, "cM/Mb (bars); good markers per Mb (grey, own scale); orange = translocation join",
+    fig.text(0.0, 0.5, "cM/Mb (bars); good markers per Mb (grey, own scale); dotted = cut of the crossover reference",
              rotation=90, va="center", fontsize=8)
     fig.tight_layout()
     return save(fig, "fig_per_chromosome_landscapes.png")
-
-
-def fig_rdna(sp):
-    d = D[sp]
-    rows = [r for r in d.get("rdna_rows", []) if r[9]]
-    if not rows:
-        return None
-    fig, ax = plt.subplots(figsize=(11, 0.75 * len(d["main"]) + 1.2))
-    co = d.get("co")
-    big = max(d["L"].values()) / 1e6
-    for i, c in enumerate(d["main"]):
-        y = len(d["main"]) - 1 - i
-        ax.add_patch(plt.Rectangle((0, y - 0.12), d["L"][c] / 1e6, 0.24, color="#D3D1C7", lw=0))
-        ax.text(-big * 0.01, y, c, ha="right", va="center", fontsize=8)
-        if co is not None:
-            nb = int(math.ceil(d["L"][c] / 5e6))
-            cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // 5e6).astype(int), nb - 1), minlength=nb)
-            top = max(1.0, float(np.bincount(np.minimum((co.mid // 5e6).astype(int), 10 ** 6)).max()))
-            ax.plot((np.arange(nb) + 0.5) * 5, y + 0.16 + 0.3 * cnt / top, color="#1D9E75", lw=0.9)
-        for _, jc, mb in JOINS.get(d["S"], []):
-            if jc == c:
-                ax.plot([mb], [y - 0.3], marker="^", color="#2C2C2A", ms=6)
-        for r in rows:
-            if r[0] != c:
-                continue
-            x = (r[10] + r[11]) / 2e6
-            sz = 4 + 4 * math.log10(max(r[5], 1))
-            ax.plot([x], [y], marker="s" if r[2] == "45S" else "o", ms=sz, mec="none",
-                    color="#D85A30" if r[2] == "45S" else "#7F77DD", alpha=0.9)
-            if r[5] >= 5:
-                ax.text(x, y + 0.2, "%s×" % fi(r[5]), ha="center", va="bottom", fontsize=6.5)
-    ax.set_xlim(-big * 0.12, big * 1.02)
-    ax.set_ylim(-0.6, len(d["main"]) - 0.3)
-    ax.set_yticks([])
-    ax.set_xlabel("Mb")
-    ax.set_title("%s (%s): the %d of %d rDNA arrays worth trusting\ncomplete 45S units (squares), 5S arrays "
-                 "(circles); size and label = HiFi reads × a typical window; triangles = joins; green = crossovers"
-                 % (NAME[sp], d["S"], len(rows), d["rdna_n_arrays"]), loc="left", fontsize=8.5)
-    for k in ("top", "right", "left"):
-        ax.spines[k].set_visible(False)
-    fig.tight_layout()
-    return save(fig, "fig_rdna_%s.png" % sp)
 
 
 def fig_structure(sp):
@@ -1244,17 +1747,18 @@ def fig_structure(sp):
     if "struct" not in d:
         return None
     n = len(d["main"])
-    fig = plt.figure(figsize=(11, 1.9 * n + 1.0))
-    gs = fig.add_gridspec(3 * n, 1, height_ratios=[3.0, 0.3, 0.42] * n, hspace=0.16)
+    fig = plt.figure(figsize=(11, 2.15 * n + 1.0))
+    gs = fig.add_gridspec(4 * n, 1, height_ratios=[3.0, 0.3, 0.42, 0.55] * n, hspace=0.12)
+    pcol = ("#ECEAF8", "#D6D2F0")
     big = max(d["L"].values()) / 1e6
     colk = {"collinear": "#D3D1C7", "INVERTED": "#A32D2D", "TRANSLOCATED": "#185FA5"}
     co = d["co"]
     for i, c in enumerate(d["main"]):
-        ax, axa, axs_ = fig.add_subplot(gs[3 * i]), fig.add_subplot(gs[3 * i + 1]), fig.add_subplot(gs[3 * i + 2])
+        ax, axa, axs_ = fig.add_subplot(gs[4 * i]), fig.add_subplot(gs[4 * i + 1]), fig.add_subplot(gs[4 * i + 2])
         L = d["L"][c] / 1e6
         nb = int(math.ceil(d["L"][c] / 5e6))
         cnt = np.bincount(np.minimum((co.mid[co.chrom == c] // 5e6).astype(int), nb - 1), minlength=nb)
-        y = 100.0 * cnt / d["ncell_co"] / 5
+        y = 100.0 * cnt / bin_cells(d, c, nb, 5e6) / 5
         ax.bar((np.arange(nb) + 0.5) * 5, y, width=5, color=COL[sp], alpha=0.85)
         pos = d["good"].pos[d["good"].chrom == c].values
         mk = np.bincount(np.minimum((pos // 5e6).astype(int), nb - 1), minlength=nb)
@@ -1268,19 +1772,19 @@ def fig_structure(sp):
             if r[0] == c:
                 a, b = [float(x) for x in r[1].split("–")]
                 ax.plot([a, b], [top * 0.94] * 2, color="#2C2C2A", lw=3, solid_capstyle="butt")
-        if c in ARMSPAN:
+        for x in d["cuts"].get(c, []):
             for a_ in (ax, axa, axs_):
-                a_.axvline(ARMSPAN[c][0], color="#2C2C2A", lw=0.9, ls=":")
+                a_.axvline(x / 1e6, color="#2C2C2A", lw=0.9, ls=":")
         ax.set_xlim(0, big)
         ax.set_ylabel("cM/Mb", fontsize=6)
         ax.tick_params(labelsize=6, labelbottom=False)
-        ax.set_title("%s%s" % (c, " = %s (%s·%s)" % (ARMNAME[c], ARMSPAN[c][1], ARMSPAN[c][2]) if c in ARMSPAN else ""),
+        ax.set_title("%s%s" % (c, " = %s" % " | ".join(label(d, s) for s in pieces_of(d, c)) if cut_txt(d, c) else ""),
                      loc="left", fontsize=8, pad=2)
-        spans = [(0, ARMSPAN[c][0], ARMSPAN[c][1]), (ARMSPAN[c][0], L, ARMSPAN[c][2])] if c in ARMSPAN else [(0, L, None)]
-        for a, b, arm in spans:
-            axa.add_patch(plt.Rectangle((a, 0), b - a, 1, color=ARM[arm] if arm else "#F1EFE8", lw=0))
-            if arm:
-                axa.text((a + b) / 2, 0.5, arm, ha="center", va="center", fontsize=7, fontweight="bold")
+        for k_, s in enumerate(pieces_of(d, c)):
+            a_, b_ = d["src"][s][1] / 1e6, (d["src"][s][1] + d["Ls"][s]) / 1e6
+            axa.add_patch(plt.Rectangle((a_, 0), b_ - a_, 1, color=pcol[k_ % 2], lw=0))
+            if cut_txt(d, c):
+                axa.text((a_ + b_) / 2, 0.5, label(d, s), ha="center", va="center", fontsize=6.5)
         st = d["struct"][c]
         axs_.add_patch(plt.Rectangle((0, 0), L, 1, color="white", ec="#B4B2A9", lw=0.5))
         for k in KINDS:
@@ -1295,17 +1799,17 @@ def fig_structure(sp):
         axa.tick_params(labelbottom=False, bottom=False)
         axa.spines["bottom"].set_visible(False)
         axs_.tick_params(labelsize=6, labelbottom=(i == n - 1))
-    handles = [plt.Rectangle((0, 0), 1, 1, color=ARM[a]) for a in ("L1", "L2", "P", "Q")] + \
+    handles = [plt.Rectangle((0, 0), 1, 1, color=pcol[0]), plt.Rectangle((0, 0), 1, 1, color=pcol[1])] + \
         [plt.Rectangle((0, 0), 1, 1, color=colk[k]) for k in KINDS] + \
         [plt.Rectangle((0, 0), 1, 1, fc="white", ec="#B4B2A9"), plt.Line2D([0], [0], color="#2C2C2A", lw=3)]
-    fig.legend(handles, ["arm L1", "arm L2", "arm P", "arm Q", "homolog collinear", "homolog inverted",
+    fig.legend(handles, ["piece of the crossover reference", "next piece", "homolog collinear", "homolog inverted",
                          "homolog from another chromosome", "no homolog alignment",
                          "no crossover over >= %d Mb" % d.get("dead_thr", 20)],
-               loc="lower center", ncol=5, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.0))
-    fig.text(0.5, 0.035, "Mb. Per chromosome: crossovers (bars, cM/Mb; grey line = good markers), the arms of the "
-             "chr1/chr2 translocation, and where the other haplotype's copy aligns (hap2 on hap1)", ha="center",
-             fontsize=7)
-    fig.subplots_adjust(top=0.985, bottom=0.085, left=0.07, right=0.98)
+               loc="lower center", ncol=4, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.0))
+    fig.text(0.5, 0.035, "Mb. Per chromosome: crossovers (bars, cM/Mb; grey line = good markers), the pieces it was cut "
+             "into for crossover calling (dotted = cut), and where the other haplotype's copy aligns (hap2 on hap1)",
+             ha="center", fontsize=7)
+    fig.subplots_adjust(top=0.985, bottom=0.075, left=0.07, right=0.98)
     return save(fig, "fig_structure_landscape_%s.png" % sp)
 
 
@@ -1353,34 +1857,19 @@ def cell_browser(sp):
     return outp, idx
 
 
-for sp, d in D.items():
-    if "co" in d:
-        guarded("interference %s" % sp, lambda d=d: interference(d))
-    if "intf" in d:
-        f = d["intf"]
-        put(sp, "interference_pairs", f["pairs"])
-        put(sp, "interference_short_ratio", "%.2f (null range %.2f–%.2f)" % (f["ratio"], f["ratio_lo"], f["ratio_hi"]))
-
+FIGS = {}
 for name, fn in (("markers", fig_markers), ("raw", fig_raw), ("cells", fig_cells), ("per_grain", fig_per_grain),
                  ("landscape", fig_landscape), ("per_chrom", fig_per_chrom), ("interference", fig_interference),
+                 ("review", fig_review), ("pairs", fig_pairs), ("phi_maps", fig_phi_maps), ("phi_zoom", fig_phi_zoom),
                  ("chrom_landscapes", fig_chrom_landscapes)):
     FIGS[name] = guarded("figure " + name, fn)
-
-PAIRS = []
-if have(PAIRS_FILE):
-    for l in open(PAIRS_FILE):
-        if len(l) > 60 and l.startswith("   ") and not l.startswith("    "):
-            lab, rest = l[3:53].strip(), l[53:].split()
-            if len(rest) >= 6 and all(t.isdigit() for t in rest[:5]):
-                PAIRS.append((lab, rest[:6]))
-for lab, vals in PAIRS:
-    NUM["paradoxa.pair." + lab] = " ".join(vals)
-FIGS["diagram"] = guarded("figure arm diagram", fig_diagram)
 FIGS["structure"] = guarded("figure structure landscape", lambda: fig_structure("paradoxa"))
-FIGS["rdna"] = guarded("figure rDNA", lambda: fig_rdna("paradoxa"))
 FIGS["hic_dual"] = guarded("figure Hi-C both haplotypes", lambda: fig_hic_dual("paradoxa"))
-for sp in D:
-    FIGS["linkhic_" + sp] = guarded("figure linkage vs Hi-C " + sp, lambda sp=sp: fig_link_hic(sp))
+for sp, d in D.items():
+    for (a, b), (x, rk) in sorted(d.get("hic_rank", {}).items()):
+        if short(a) in d.get("hic_focus", []) and short(b) in d.get("hic_focus", []):
+            put(sp, "hic_contacts.%s|%s" % (a, b), "%.2fx the median non-homologous pair, rank %d of %d"
+                % (x, rk, d["hic_npairs"]))
 EXAMPLES = guarded("example cells", example_cells) or {}
 BROWSER = {}
 if not A.no_cell_pdfs:
@@ -1388,6 +1877,7 @@ if not A.no_cell_pdfs:
         BROWSER[sp] = guarded("cell browser " + sp, lambda sp=sp: cell_browser(sp))
 
 # =========================================================================== html
+MOL_GAP, = code_const("workflow/scripts/molecule_tables.py", r"\nGAP = (\d+)", 1)
 
 
 def img(p, width=100):
@@ -1419,118 +1909,79 @@ def P(text):
     return "<p>%s</p>" % text
 
 
-def two(f):
-    return [f(B), f(Pd)]
-
-
 def sel(d, k):
     return d.get("sel", {}).get(k, "–")
 
 
-H = []
-now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-commit = subprocess.run("git rev-parse --short HEAD", shell=True, stdout=subprocess.PIPE,
-                        universal_newlines=True).stdout.strip()
-TAG = subprocess.run("git tag -l 'binata-landscape*' | tail -n 1", shell=True, stdout=subprocess.PIPE,
-                     universal_newlines=True).stdout.strip()
-GOOD_TXT = ("heterozygous SNPs that segregate cleanly in the pollen: ALT in %s–%s%% of the nuclei that cover them, "
-            "and one allele per nucleus" % (ff(100 * GOOD_LO, 0), ff(100 * GOOD_HI, 0)))
-
-H.append("<h1>Meiotic crossover landscapes of <i>Drosera binata</i> and <i>D. paradoxa</i> from single pollen nuclei</h1>")
-H.append("<p class='meta'>Generated %s from CO_smk commit %s by workflow/scripts/supervisor_report.py. Every number, "
-         "table and figure is computed from the pipeline's outputs (files listed in the appendix).</p>" % (now, commit))
-if PROBLEMS:
-    H.append("<p class='missing'>Parts that could not be built: %s</p>" % html.escape(
-        "; ".join("%s (%s)" % p for p in PROBLEMS)))
-
-# ---- 0
-H.append("<h2>0. Summary</h2>")
-nj_txt = (" (%s without the crossovers at the translocation joins, an artefact of the reference)" % ff(Pd["co_mean_nj"], 2)
-          if "co_mean_nj" in Pd else "")
-H.append(P(
-    "Single pollen nuclei of <i>D. binata</i> and <i>D. paradoxa</i> were sequenced (scRNA-seq) and genotyped at "
-    "heterozygous SNPs called from HiFi reads; a crossover is called where a nucleus switches between the two "
-    "haplotypes. <b>%s</b> (%s): %s nuclei, %s crossovers per grain against an obligate minimum of %s; landscape %s. "
-    "<b>%s</b> (%s): %s nuclei, %s crossovers per grain%s against a minimum of %s; landscape %s. "
-    "The <i>D. paradoxa</i> landscape is provisional: the pollen inherit the arms of chromosomes 1 and 2 in a different "
-    "combination than the plant's tissue carries them (section 7)."
-    % (NAME["binata"], B["row"]["centromere"], fi(B.get("ncell_co")), ff(B.get("co_mean"), 2), ff(B["n"] / 2), HEAD["binata"],
-       NAME["paradoxa"], Pd["row"]["centromere"], fi(Pd.get("ncell_co")), ff(Pd.get("co_mean"), 2), nj_txt,
-       ff(Pd["n"] / 2), HEAD["paradoxa"])))
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
-    ["centromere type", B["row"]["centromere"], Pd["row"]["centromere"]],
-    ["chromosomes (n)", B["n"], Pd["n"]],
-    ["assembly, both haplotypes (2C), chromosomes, Mb", ff(B.get("asm2n_chr_mb"), 0), ff(Pd.get("asm2n_chr_mb"), 0)],
-    ["reference used for crossovers (1C), Mb", ff(B["G"] / 1e6, 0), ff(Pd["G"] / 1e6, 0)],
-    ["good markers (%s)" % GOOD_TXT, fi(B.get("good_n")), fi(Pd.get("good_n"))],
-    ["pollen nuclei used", fi(len(B["cells"])), fi(len(Pd["cells"]))],
-    ["informative molecules per nucleus, median", fi(B.get("selected_molecules_median")),
-     fi(Pd.get("selected_molecules_median"))],
-    ["crossovers per grain, mean (SD)", "%s (%s)" % (ff(B.get("co_mean"), 2), ff(B.get("co_sd"), 2)),
-     "%s (%s)%s" % (ff(Pd.get("co_mean"), 2), ff(Pd.get("co_sd"), 2),
-                    "; %s without the join artefact" % ff(Pd["co_mean_nj"], 2) if "co_mean_nj" in Pd else "")],
-    ["obligate minimum (one per bivalent)", ff(B["n"] / 2), ff(Pd["n"] / 2)],
-    ["genetic map length, cM", fi(100 * B["co_mean"]) if ok(B.get("co_mean")) else "–",
-     fi(100 * Pd["co_mean_nj"]) + " (without the join artefact)" if "co_mean_nj" in Pd
-     else fi(100 * Pd.get("co_mean", float("nan")))],
-    ["landscape", HEAD["binata"], HEAD["paradoxa"]],
-    ["status", "near-final%s: crossover-calling settings need minor optimisation" % (" (git tag %s)" % TAG if TAG else ""),
-     "provisional: reference under review, crossover-calling settings not yet tuned"]]))
-H.append(P("2n assemblies: <i>D. binata</i> <code>%s</code>; <i>D. paradoxa</i> <code>%s</code>."
-           % (html.escape(str(B.get("asm2n", "not found"))), html.escape(str(Pd.get("asm2n", "not found"))))))
-
-# ---- 1
-H.append("<h2>1. Material and data</h2>")
+def setting_txt(sp):
+    c = CC.get(D[sp]["species"]) or {}
+    bs = ("%g" % (float(c["block_size"]) / 1e6)) if "block_size" in c else "–"
+    return "marker_num %s, block_size %s Mb, terminal_marker_num %s, base_af %s" % (
+        c.get("marker_num", "–"), bs, c.get("terminal_marker_num", "–"), c.get("base_af", "–"))
 
 
-def ref_desc(d):
-    if d["row"]["haplotype"] == "composite":
-        return "composite of the two haplotypes: %s" % ", ".join(d["main"])
-    return "haplotype %s of the phased assembly: %s" % (d["row"]["haplotype"].replace("hap", ""),
-                                                        "%s–%s" % (d["main"][0], d["main"][-1]))
+def f1_txt(d, lab, full=False):
+    r = score_row(d, d.get("rv", {}).get(lab))
+    if r is None:
+        return "–"
+    t = "F1 %s (95%% %s–%s)" % (ff(r.F1, 3), ff(r.F1_lo, 3), ff(r.F1_hi, 3))
+    if full:
+        t = "%s: %s; TP %s, FP %s, FN %s; precision %s, recall %s; %s calls per reviewed nucleus" % (
+            r.setting, t, fi(r.TP), fi(r.FP), fi(r.FN), ff(r.precision, 3), ff(r.recall, 3), ff(r.cos_per_cell, 2))
+    return t
 
 
-star_keys = [("Number of input reads", "reads into STARsolo"), ("Average input read length", "read length, bp"),
-             ("Uniquely mapped reads %", "mapped uniquely"), ("% of reads mapped to multiple loci", "mapped to several loci"),
-             ("% of reads mapped to too many loci", "mapped to too many loci"),
-             ("% of reads unmapped: too short", "unmapped: too short"), ("% of reads unmapped: other", "unmapped: other")]
-rows1 = [["sample in the pipeline", B["S"], Pd["S"]],
-         ["reference used", ref_desc(B), ref_desc(Pd) + " (hap1, but chr2 from hap2, so each arm of the chr1/chr2 "
-                                                           "translocation occurs once; section 7)"
-          if Pd["S"] == "Dparadoxa_std" else ref_desc(Pd)],
-         ["2n (config)", B["row"]["chr_number_2n"], Pd["row"]["chr_number_2n"]],
-         ["assembly, both haplotypes (2C): chromosomes / all sequence, Mb",
-          "%s / %s" % (ff(B.get("asm2n_chr_mb"), 0), ff(B.get("asm2n_all_mb"), 0)),
-          "%s / %s" % (ff(Pd.get("asm2n_chr_mb"), 0), ff(Pd.get("asm2n_all_mb"), 0))],
-         ["reference used (1C), chromosomes, Mb", ff(B["G"] / 1e6, 0), ff(Pd["G"] / 1e6, 0)],
-         ["genes on these chromosomes (annotation)", fi(len(B["genes"])) if "genes" in B else "–",
-          (fi(len(Pd["genes"])) + " (inflated: includes many transposable-element gene models)") if "genes" in Pd else "–"],
-         ["scRNA chemistry", B["row"]["chemistry"], Pd["row"]["chemistry"]]]
-for k, lab in star_keys:
-    rows1.append([lab, B.get("star", {}).get(k, "–"), Pd.get("star", {}).get(k, "–")])
-solo_keys = []
-for d in (B, Pd):
-    for k, _ in d.get("solo", []):
-        if k not in solo_keys and "Cell" not in k:
-            solo_keys.append(k)
+def seq_desc(d):
+    if d["pieces"]:
+        return "%d pieces of %d chromosomes" % (len(d["seqs"]), len(d["main"]))
+    return "%d chromosomes (%s)" % (len(d["main"]), d["row"]["haplotype"])
 
 
-def solo_val(d, k):
-    v = dict(d.get("solo", [])).get(k, "–")
-    try:
-        x = float(v)
-        return ("%.1f%%" % (100 * x)) if x <= 1 else fi(x)
-    except ValueError:
-        return v
+def excl_txt(d, dropped=True):
+    if not d.get("excl"):
+        return "none"
+    t = ", ".join("%s:%s–%s" % (r["chrom"], fi(r["start"]), fi(r["end"])) for r in d["excl"])
+    return t + (" (%s molecules dropped)" % fi(d.get("excl_dropped")) if dropped else "")
 
 
-for k in solo_keys:
-    rows1.append(["STARsolo %s: %s" % (B.get("solo_feature", Pd.get("solo_feature", "")), k), solo_val(B, k),
-                  solo_val(Pd, k)])
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], rows1))
+def status(sp):
+    d, rv = D[sp], D[sp].get("rv", {})
+    s = "settings stamped %s from the review of %s nuclei" % (rv.get("stamp_date") or "–", fi(rv.get("cells")))
+    opens = []
+    if d.get("excl"):
+        opens.append("%s left out by hand, to be replaced by an automatic filter" % excl_txt(d, dropped=False))
+    for r in d.get("unexplained", []):
+        opens.append("%s and %s inherited together, not explained by the assembly" % (label(d, r["a"]), label(d, r["b"])))
+    return s + ("; open: " + "; ".join(opens) + " (section 7)" if opens else "")
 
-# ---- 2
-H.append("<h2>2. Pipeline at a glance</h2>")
+
+def pl(n, word, plural=None):
+    """'1 pair', '3 pairs'"""
+    return "%s %s" % (fi(n), word if ok(n) and float(n) == 1 else (plural or word + "s"))
+
+
+def dup_txt(d):
+    t = "%s among %s" % (pl(d.get("dup_pairs"), "pair"), pl(d.get("dup_cells"), "nucleus", "nuclei"))
+    c = d.get("dup_chance")
+    return t + ("; %s by chance (95%% %s–%s; p %s)" % (ff(c[0]), fi(c[1]), fi(c[2]), "%.3g" % d["dup_p"]) if c else "")
+
+
+def dup_above_chance(sp):
+    return D[sp].get("dup_p", 1.0) < 0.05
+
+
+def dup_reading(sp):
+    d, c = D[sp], D[sp].get("dup_chance")
+    if not c or "dup_pairs" not in d:
+        return "<i>%s</i> not tested" % NAME[sp]
+    if dup_above_chance(sp):
+        ex = d["dup_pairs"] - c[0]
+        return ("<i>%s</i>: %s against %s by chance (p %s), an excess of about %s pairs: %s two nuclei of one grain"
+                % (NAME[sp], pl(d["dup_pairs"], "pair"), ff(c[0]), "%.3g" % d["dup_p"], fi(ex),
+                   "most are likely" if ex > d["dup_pairs"] / 2 else "some are likely"))
+    return ("<i>%s</i>: %s, no more than unrelated nuclei give by chance (%s, p %s; the genome segregates as %d "
+            "linkage groups here)" % (NAME[sp], pl(d["dup_pairs"], "pair"), ff(c[0]), "%.3g" % d["dup_p"],
+                                       d["link_groups"]))
 
 
 def sel_txt(d):
@@ -1541,350 +1992,732 @@ def sel_txt(d):
     return t + ("; ≥ %s molecules in total" % mm if mm not in ("0", "0.0", "–") else "; no total-molecule floor")
 
 
-H.append(table(["step", "what it does", NAME["binata"], NAME["paradoxa"]], [
-    ["1 markers", "heterozygous SNPs called from HiFi reads (bcftools), filtered on quality, depth, allele balance "
-                  "and rDNA (section 3)", "%s raw → %s" % (fi(B.get("raw")), fi(B.get("filtered"))),
-     "%s raw → %s" % (fi(Pd.get("raw")), fi(Pd.get("filtered")))],
-    ["2 markers seen in pollen", "markers covered by pollen reads, classed by how they segregate; 'good' = %s" % GOOD_TXT,
-     "%s seen → %s good" % (fi(B.get("seen")), fi(B.get("good_n"))),
-     "%s seen → %s good" % (fi(Pd.get("seen")), fi(Pd.get("good_n")))],
-    ["3 align pollen RNA", "STARsolo to the reference",
-     "%s reads, %s unique" % (B.get("star", {}).get("Number of input reads", "–"),
-                              B.get("star", {}).get("Uniquely mapped reads %", "–")),
-     "%s reads, %s unique" % (Pd.get("star", {}).get("Number of input reads", "–"),
-                              Pd.get("star", {}).get("Uniquely mapped reads %", "–"))],
-    ["4 call barcodes", "EmptyDrops on UMI counts; generous, removes only empty droplets and barcode errors",
-     "%s → %s" % (fi(NUM.get("binata.barcodes_tested")), fi(NUM.get("binata.cells_called"))),
-     "%s → %s" % (fi(NUM.get("paradoxa.barcodes_tested")), fi(NUM.get("paradoxa.cells_called")))],
-    ["5 keep single haploid nuclei", "one haplotype per window and enough evidence on every chromosome: " + sel_txt(B)
-     + " (binata); " + sel_txt(Pd) + " (paradoxa)",
-     "%s → %s" % (sel(B, "barcodes counted by cellsnp"), fi(len(B["cells"]))),
-     "%s → %s" % (sel(Pd, "barcodes counted by cellsnp"), fi(len(Pd["cells"])))],
-    ["6 call crossovers", "hapCO: blocks of informative molecules; a crossover where the haplotype switches",
-     "%s crossovers" % fi(B.get("co_total")), "%s crossovers" % fi(Pd.get("co_total"))]]))
+def masked_classes(d):
+    return ", ".join((CC.get(d["species"]) or {}).get("mask_classes", []) or ["none"])
+
+
+H = []
+now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+commit = subprocess.run("git rev-parse --short HEAD", shell=True, stdout=subprocess.PIPE,
+                        universal_newlines=True).stdout.strip()
+GOOD_TXT = ("heterozygous SNPs that segregate cleanly in the pollen: ALT in %s–%s%% of the nuclei that cover them, "
+            "and one allele per nucleus" % (ff(100 * GOOD_LO, 0), ff(100 * GOOD_HI, 0)))
+
+H.append("<h1>Meiotic crossover landscapes of <i>Drosera binata</i> and <i>D. paradoxa</i> from single pollen nuclei</h1>")
+H.append("<p class='meta'>Version 5, generated %s from CO_smk commit %s by workflow/scripts/supervisor_report.py "
+         "(<i>D. binata</i>: %s; <i>D. paradoxa</i>: %s). Every number, table and figure is computed from the "
+         "pipeline's outputs (files listed in the appendix).</p>" % (now, commit, B["S"], Pd["S"]))
+
+
+def run_section(name, fn):
+    """Build one section; if it fails, say so in red where it would have been and list it at the top."""
+    try:
+        fn()
+    except Exception as e:
+        PROBLEMS.append((name, "%s: %s" % (type(e).__name__, e)))
+        traceback.print_exc()
+        H.append("<p class='missing'>%s could not be built: %s</p>" % (html.escape(name), html.escape(str(e))))
+
+
+
+# ---- 0
+def section_0():
+    H.append("<h2>0. Summary</h2>")
+
+    def sp_line(sp):
+        d = D[sp]
+        ref = ("; crossovers called on a reference cut into %d pieces at the %d points where a chromosome's partner in "
+               "the other haplotype changes, so no join between translocated pieces is assumed"
+               % (len(d["seqs"]), sum(len(v) for v in d["cuts"].values()))) if d["pieces"] else ""
+        return ("<b>%s</b> (%s%s): %s nuclei, %s crossovers per grain against %s from one crossover per bivalent "
+                "(n/2), a genetic map of %s cM; landscape %s." % (
+                    NAME[sp], d["row"]["centromere"], ref, fi(d.get("ncell_co")), ff(d.get("co_mean"), 2), ff(d["n"] / 2),
+                    fi(d.get("map_cm")), HEAD[sp]))
+
+    summ = ["Single pollen nuclei of <i>D. binata</i> and <i>D. paradoxa</i> were sequenced (scRNA-seq) and genotyped at "
+            "heterozygous SNPs called from HiFi reads; a crossover is called where a nucleus switches between the two "
+            "haplotypes.", sp_line("binata"), sp_line("paradoxa")]
+    if all(score_row(D[sp], D[sp].get("rv", {}).get("chosen")) is not None for sp in D):
+        summ.append("The crossover-calling settings of both were chosen by scoring every swept setting against the "
+                    "verdicts of a review of the calls (judged by eye, or accepted automatically where nearly every "
+                    "setting agrees) in %s and %s nuclei: %s and %s, against %s and %s for the settings used before "
+                    "(section 5)." % (fi(B["rv"].get("cells")), fi(Pd["rv"].get("cells")),
+                                                   f1_txt(B, "chosen"), f1_txt(Pd, "chosen"), f1_txt(B, "previous"),
+                                                   f1_txt(Pd, "previous")))
+    for sp, d in D.items():
+        for r in d.get("unexplained", []):
+            summ.append("Open in <i>%s</i>: %s and %s are inherited together in the pollen (|φ| up to %s between their "
+                        "windows, chance level %s) although they are separate chromosomes in the assembly (section 7)."
+                        % (NAME[sp], label(d, r["a"]), label(d, r["b"]), ff(r["absphi"], 2), ff(d["fw_thr"], 2)))
+        if d.get("excl"):
+            summ.append("<i>%s</i> %s is left out of crossover calling by hand, its alleles following another place in "
+                        "the genome; an automatic filter is to replace the hand-picked list (section 7)."
+                        % (NAME[sp], excl_txt(d, dropped=False)))
+    H.append(P(" ".join(summ)))
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
+        ["centromere type", B["row"]["centromere"], Pd["row"]["centromere"]],
+        ["chromosomes (n)", B["n"], Pd["n"]],
+        ["reference sequences crossovers are called on", seq_desc(B), seq_desc(Pd)],
+        ["assembly, both haplotypes (2C), chromosomes, Mb", ff(B.get("asm2n_chr_mb"), 0), ff(Pd.get("asm2n_chr_mb"), 0)],
+        ["reference used for crossovers (1C), Mb", ff(B["G"] / 1e6, 0), ff(Pd["G"] / 1e6, 0)],
+        ["good markers (%s)" % GOOD_TXT, fi(B.get("good_n")), fi(Pd.get("good_n"))],
+        ["pollen nuclei used", fi(len(B["cells"])), fi(len(Pd["cells"]))],
+        ["informative molecules per nucleus, median", fi(B.get("selected_molecules_median")),
+         fi(Pd.get("selected_molecules_median"))],
+        ["crossovers per grain, mean (SD)", "%s (%s)" % (ff(B.get("co_mean"), 2), ff(B.get("co_sd"), 2)),
+         "%s (%s)" % (ff(Pd.get("co_mean"), 2), ff(Pd.get("co_sd"), 2))],
+        ["one crossover per bivalent gives, per grain on average (n / 2)", ff(B["n"] / 2), ff(Pd["n"] / 2)],
+        ["genetic map length, cM (crossovers per nucleus summed over sequences, each over the nuclei that count for it)",
+         fi(B.get("map_cm")), fi(Pd.get("map_cm"))],
+        ["landscape", HEAD["binata"], HEAD["paradoxa"]],
+        ["crossover-calling settings", "%s; %s" % (setting_txt("binata"), f1_txt(B, "chosen")),
+         "%s; %s" % (setting_txt("paradoxa"), f1_txt(Pd, "chosen"))],
+        ["status", status("binata"), status("paradoxa")]]))
+    H.append(P("2n assemblies: <i>D. binata</i> <code>%s</code>; <i>D. paradoxa</i> <code>%s</code>."
+               % (html.escape(str(B.get("asm2n", "not found"))), html.escape(str(Pd.get("asm2n", "not found"))))))
+
+
+run_section('section 0', section_0)
+
+# ---- 1
+def section_1():
+    H.append("<h2>1. Material and data</h2>")
+
+    def ref_desc(d):
+        if d["pieces"]:
+            return ("%s, cut into %d pieces at the %d points where a chromosome's partner in the other haplotype changes "
+                    "(table below)" % (", ".join(d["main"]), len(d["seqs"]), sum(len(v) for v in d["cuts"].values())))
+        return "haplotype %s of the phased assembly: %s–%s" % (d["row"]["haplotype"].replace("hap", ""), d["main"][0],
+                                                              d["main"][-1])
+
+    star_keys = [("Number of input reads", "reads into STARsolo"), ("Average input read length", "read length, bp"),
+                 ("Uniquely mapped reads %", "mapped uniquely"), ("% of reads mapped to multiple loci", "mapped to several loci"),
+                 ("% of reads mapped to too many loci", "mapped to too many loci"),
+                 ("% of reads unmapped: too short", "unmapped: too short"), ("% of reads unmapped: other", "unmapped: other")]
+    rows1 = [["sample in the pipeline", B["S"], Pd["S"]],
+             ["reference used", ref_desc(B), ref_desc(Pd)],
+             ["2n (config)", B["row"]["chr_number_2n"], Pd["row"]["chr_number_2n"]],
+             ["assembly, both haplotypes (2C): chromosomes / all sequence, Mb",
+              "%s / %s" % (ff(B.get("asm2n_chr_mb"), 0), ff(B.get("asm2n_all_mb"), 0)),
+              "%s / %s" % (ff(Pd.get("asm2n_chr_mb"), 0), ff(Pd.get("asm2n_all_mb"), 0))],
+             ["reference used (1C), chromosomes, Mb", ff(B["G"] / 1e6, 0), ff(Pd["G"] / 1e6, 0)],
+             ["genes on these chromosomes (annotation)", fi(len(B["genes"])) if "genes" in B else "–",
+              (fi(len(Pd["genes"])) + " (inflated: includes many transposable-element gene models)") if "genes" in Pd else "–"],
+             ["scRNA chemistry", B["row"]["chemistry"], Pd["row"]["chemistry"]]]
+    for k, lab in star_keys:
+        rows1.append([lab, B.get("star", {}).get(k, "–"), Pd.get("star", {}).get(k, "–")])
+    solo_keys = []
+    for d in (B, Pd):
+        for k, _ in d.get("solo", []):
+            if k not in solo_keys and "Cell" not in k:
+                solo_keys.append(k)
+
+    def solo_val(d, k):
+        v = dict(d.get("solo", [])).get(k, "–")
+        try:
+            x = float(v)
+            return ("%.1f%%" % (100 * x)) if x <= 1 else fi(x)
+        except ValueError:
+            return v
+
+    for k in solo_keys:
+        rows1.append(["STARsolo %s: %s" % (B.get("solo_feature", Pd.get("solo_feature", "")), k), solo_val(B, k),
+                      solo_val(Pd, k)])
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], rows1))
+    for sp, d in D.items():
+        if d["pieces"]:
+            H.append("<h3><i>%s</i>: the pieces of the crossover reference (%s)</h3>" % (NAME[sp], d["S"]))
+            H.append(table(["piece", "said as", "cut from", "Mb on that chromosome", "length, Mb",
+                            "how the cut was placed (config/split_plans)"],
+                           [[s, label(d, s), d["src"][s][0], "%s–%s" % (ff(d["src"][s][1] / 1e6), ff((d["src"][s][1] +
+                             d["Ls"][s]) / 1e6)), ff(d["Ls"][s] / 1e6), d["how"].get(s, "")] for s in d["seqs"]]))
+            H.append(P("Each piece is a sequence of its own: crossovers are called inside a piece only, a nucleus is "
+                       "checked for carrying each piece once (section 4), and how the pieces travel together is measured "
+                       "from the pollen (section 7). Landscapes and the one-crossover-per-chromosome checks put the pieces "
+                       "back on the chromosome they were cut from. The cut points come from the hap2-on-hap1 alignment "
+                       "(breakpoints_from_paf.py; its notes in the last column)."))
+
+
+run_section('section 1', section_1)
+
+# ---- 2
+def section_2():
+    H.append("<h2>2. Pipeline at a glance</h2>")
+
+    def mask_txt(d):
+        return "%s nucleus × sequence masked (%s), %s calls dropped" % (fi(len(d.get("masked_pairs", ()))),
+                                                                         masked_classes(d), fi(d.get("masked_calls")))
+
+    H.append(table(["step", "what it does", NAME["binata"], NAME["paradoxa"]], [
+        ["1 markers", "heterozygous SNPs called from HiFi reads (bcftools), filtered on quality, depth, allele balance "
+                      "and rDNA (section 3)", "%s raw → %s" % (fi(B.get("raw")), fi(B.get("filtered"))),
+         "%s raw → %s" % (fi(Pd.get("raw")), fi(Pd.get("filtered")))],
+        ["2 markers seen in pollen", "markers covered by pollen reads, classed by how they segregate; 'good' = %s" % GOOD_TXT,
+         "%s seen → %s good" % (fi(B.get("seen")), fi(B.get("good_n"))),
+         "%s seen → %s good" % (fi(Pd.get("seen")), fi(Pd.get("good_n")))],
+        ["3 align pollen RNA", "STARsolo to the reference",
+         "%s reads, %s unique" % (B.get("star", {}).get("Number of input reads", "–"),
+                                  B.get("star", {}).get("Uniquely mapped reads %", "–")),
+         "%s reads, %s unique" % (Pd.get("star", {}).get("Number of input reads", "–"),
+                                  Pd.get("star", {}).get("Uniquely mapped reads %", "–"))],
+        ["4 call barcodes", "EmptyDrops on UMI counts; generous, removes only empty droplets and barcode errors",
+         "%s → %s" % (fi(NUM.get("binata.barcodes_tested")), fi(NUM.get("binata.cells_called"))),
+         "%s → %s" % (fi(NUM.get("paradoxa.barcodes_tested")), fi(NUM.get("paradoxa.cells_called")))],
+        ["5 keep single haploid nuclei", "one haplotype per window and enough evidence on every chromosome: " + sel_txt(B)
+         + " (binata); " + sel_txt(Pd) + " (paradoxa)",
+         "%s → %s" % (sel(B, "barcodes counted by cellsnp"), fi(len(B["cells"]))),
+         "%s → %s" % (sel(Pd, "barcodes counted by cellsnp"), fi(len(Pd["cells"])))],
+        ["6 molecule tables", "good markers only; markers < %s bp apart ride on one read and count once (the deepest); "
+                              "stretches listed in config/exclude_regions are left out" % ff(MOL_GAP, 0),
+         excl_txt(B), excl_txt(Pd)],
+        ["7 call crossovers", "hapCO per nucleus, with the settings chosen in the review (section 5)",
+         "%s crossovers kept" % fi(B.get("co_total")), "%s crossovers kept" % fi(Pd.get("co_total"))],
+        ["8 dosage masks", "a nucleus that carries a sequence twice, not at all or mixed does not count for it, and its "
+                           "calls there are dropped (section 4)", mask_txt(B), mask_txt(Pd)]]))
+
+
+run_section('section 2', section_2)
 
 # ---- 3
-H.append("<h2>3. Markers: what defines the two haplotypes</h2>")
-H.append(img(FIGS.get("raw")))
-H.append(P("Why the filters sit where they do: the depth window brackets the main heterozygous peak (single-copy "
-           "sequence) and cuts the high-depth tail (collapsed repeats), and the allele-balance window keeps SNPs "
-           "near 50:50, as true heterozygous sites are. Shares are of heterozygous biallelic SNPs in a regular "
-           "1-in-k sample of the raw calls; %s%% (<i>D. binata</i>) and %s%% (<i>D. paradoxa</i>) pass all filters."
-           % (ff(100 * B.get("raw_share_pass", float("nan"))), ff(100 * Pd.get("raw_share_pass", float("nan"))))))
-H.append(img(FIGS.get("markers")))
-cls_def = {"good": GOOD_TXT,
-           "sticky": "nearly always the same allele: ALT in < %s%% or > %s%% of nuclei (assembly or genotyping error)"
-                     % (ff(100 * STICKY, 0), ff(100 * (1 - STICKY), 0)),
-           "paralog": "both alleles inside one nucleus in ≥ %s%% of deep observations: two copies collapsed in the "
-                      "assembly" % ff(100 * PARALOG, 0),
-           "other": "judged, but between sticky and good (ALT in %s–%s%% or %s–%s%%)"
-                    % (ff(100 * STICKY, 0), ff(100 * GOOD_LO, 0), ff(100 * GOOD_HI, 0), ff(100 * (1 - STICKY), 0)),
-           "unjudged": "covered in fewer than %s nuclei: too few to judge, not used" % ff(MIN_CELLS, 0)}
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
-    ["raw variants (HiFi)", fi(B.get("raw")), fi(Pd.get("raw"))],
-    ["after filters", fi(B.get("filtered")), fi(Pd.get("filtered"))],
-    ["filters (depth, quality, allele balance)",
-     "%(min_dp)d–%(max_dp)d reads, QUAL ≥ %(min_qual)g, ALT %(lo)g–%(hi)g" % B["fp"] if "fp" in B else "–",
-     "%(min_dp)d–%(max_dp)d reads, QUAL ≥ %(min_qual)g, ALT %(lo)g–%(hi)g" % Pd["fp"] if "fp" in Pd else "–"],
-    ["markers removed for lying in rDNA (estimate from the sample) / rDNA sequence masked, kb",
-     "≈%s / %s" % (fi(B.get("rdna_markers_est")), fi(B.get("rdna_bp", float("nan")) / 1e3)),
-     "≈%s / %s" % (fi(Pd.get("rdna_markers_est")), fi(Pd.get("rdna_bp", float("nan")) / 1e3))],
-    ["seen in pollen", fi(B.get("seen")), fi(Pd.get("seen"))]] + [
-    ["class %s (%s)" % (k, cls_def[k]), fi(B.get("classes", {}).get(k)), fi(Pd.get("classes", {}).get(k))]
-    for k in ("good", "sticky", "paralog", "other", "unjudged")] + [
-    ["good markers per Mb", ff(B.get("good_per_mb")), ff(Pd.get("good_per_mb"))],
-    ["marker clusters (good markers ≤ %s bp apart merged, as on one read)" % ff(HT_GAP, 0), fi(B.get("clusters")),
-     fi(Pd.get("clusters"))],
-    ["gap between clusters: median kb / 95th percentile kb / largest Mb",
-     "%s / %s / %s" % (ff(B.get("gap_median_kb")), ff(B.get("gap_p95_kb"), 0), ff(B.get("gap_max_mb"))),
-     "%s / %s / %s" % (ff(Pd.get("gap_median_kb")), ff(Pd.get("gap_p95_kb"), 0), ff(Pd.get("gap_max_mb")))],
-    ["chromosome sequence inside gaps > 1 Mb, %", ff(100 * B.get("gap_1mb_share", float("nan"))),
-     ff(100 * Pd.get("gap_1mb_share", float("nan")))],
-    ["good markers inside annotated genes, %", ff(100 * B.get("good_in_genes", float("nan"))),
-     ff(100 * Pd.get("good_in_genes", float("nan")))]]))
-H.append(P("Markers come from pollen RNA, so they cluster in expressed genes, several per read; the distance between "
-           "neighbouring markers is therefore tens of bp, and the gaps that matter are those between clusters."))
+def section_3():
+    H.append("<h2>3. Markers: what defines the two haplotypes</h2>")
+    H.append(img(FIGS.get("raw")))
+    H.append(P("Why the filters sit where they do: the depth window brackets the main heterozygous peak (single-copy "
+               "sequence) and cuts the high-depth tail (collapsed repeats), and the allele-balance window keeps SNPs "
+               "near 50:50, as true heterozygous sites are. Shares are of heterozygous biallelic SNPs in a regular "
+               "1-in-k sample of the raw calls; %s%% (<i>D. binata</i>) and %s%% (<i>D. paradoxa</i>) pass all filters."
+               % (ff(100 * B.get("raw_share_pass", float("nan"))), ff(100 * Pd.get("raw_share_pass", float("nan"))))))
+    H.append(img(FIGS.get("markers")))
+    cls_def = {"good": GOOD_TXT,
+               "sticky": "nearly always the same allele: ALT in < %s%% or > %s%% of nuclei (assembly or genotyping error)"
+                         % (ff(100 * STICKY, 0), ff(100 * (1 - STICKY), 0)),
+               "paralog": "both alleles inside one nucleus in ≥ %s%% of deep observations: two copies collapsed in the "
+                          "assembly" % ff(100 * PARALOG, 0),
+               "other": "judged, but between sticky and good (ALT in %s–%s%% or %s–%s%%)"
+                        % (ff(100 * STICKY, 0), ff(100 * GOOD_LO, 0), ff(100 * GOOD_HI, 0), ff(100 * (1 - STICKY), 0)),
+               "unjudged": "covered in fewer than %s nuclei: too few to judge, not used" % ff(MIN_CELLS, 0)}
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
+        ["raw variants (HiFi)", fi(B.get("raw")), fi(Pd.get("raw"))],
+        ["after filters", fi(B.get("filtered")), fi(Pd.get("filtered"))],
+        ["filters (depth, quality, allele balance)",
+         "%(min_dp)d–%(max_dp)d reads, QUAL ≥ %(min_qual)g, ALT %(lo)g–%(hi)g" % B["fp"] if "fp" in B else "–",
+         "%(min_dp)d–%(max_dp)d reads, QUAL ≥ %(min_qual)g, ALT %(lo)g–%(hi)g" % Pd["fp"] if "fp" in Pd else "–"],
+        ["markers removed for lying in rDNA (estimate from the sample) / rDNA sequence masked, kb",
+         "≈%s / %s" % (fi(B.get("rdna_markers_est")), fi(B.get("rdna_bp", float("nan")) / 1e3)),
+         "≈%s / %s" % (fi(Pd.get("rdna_markers_est")), fi(Pd.get("rdna_bp", float("nan")) / 1e3))],
+        ["seen in pollen", fi(B.get("seen")), fi(Pd.get("seen"))]] + [
+        ["class %s (%s)" % (k, cls_def[k]), fi(B.get("classes", {}).get(k)), fi(Pd.get("classes", {}).get(k))]
+        for k in ("good", "sticky", "paralog", "other", "unjudged")] + [
+        ["good markers per Mb", ff(B.get("good_per_mb")), ff(Pd.get("good_per_mb"))],
+        ["marker clusters (good markers ≤ %s bp apart merged, as on one read)" % ff(HT_GAP, 0), fi(B.get("clusters")),
+         fi(Pd.get("clusters"))],
+        ["gap between clusters: median kb / 95th percentile kb / largest Mb",
+         "%s / %s / %s" % (ff(B.get("gap_median_kb")), ff(B.get("gap_p95_kb"), 0), ff(B.get("gap_max_mb"))),
+         "%s / %s / %s" % (ff(Pd.get("gap_median_kb")), ff(Pd.get("gap_p95_kb"), 0), ff(Pd.get("gap_max_mb")))],
+        ["chromosome sequence inside gaps > 1 Mb, %", ff(100 * B.get("gap_1mb_share", float("nan"))),
+         ff(100 * Pd.get("gap_1mb_share", float("nan")))],
+        ["good markers inside annotated genes, %", ff(100 * B.get("good_in_genes", float("nan"))),
+         ff(100 * Pd.get("good_in_genes", float("nan")))]]))
+    H.append(P("Markers come from pollen RNA, so they cluster in expressed genes, several per read; the distance between "
+               "neighbouring markers is therefore tens of bp, and the gaps that matter are those between clusters."))
+
+
+run_section('section 3', section_3)
 
 # ---- 4
-H.append("<h2>4. Cells: how many, how deep, how clean</h2>")
-H.append(img(FIGS.get("cells")))
-H.append(P("Doublets: two nuclei in one droplet carry both haplotypes, so their 15-molecule windows sit at 0, 0.5 "
-           "and 1 instead of 0 or 1, giving haploidness near 0.5 or below; the haploidness floor removes them, together "
-           "with diploid barcodes. This filter replaced the switch-rate filter used for <i>Cuscuta</i> and "
-           "<i>Spondias</i>: in these libraries most neighbouring markers sit on one read and agree automatically, "
-           "so the switch rate measured read clustering rather than doublets (rule select_cells)."))
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
-    ["barcodes tested / called", "%s / %s" % (fi(NUM.get("binata.barcodes_tested")), fi(NUM.get("binata.cells_called"))),
-     "%s / %s" % (fi(NUM.get("paradoxa.barcodes_tested")), fi(NUM.get("paradoxa.cells_called")))],
-    ["called barcodes with allele counts (cellsnp)", sel(B, "barcodes counted by cellsnp"),
-     sel(Pd, "barcodes counted by cellsnp")],
-    ["scored for haploidness (≥ %s windows of %s molecules)" % (ff(HT_MINWIN, 0), ff(HT_W, 0)), sel(B, "scored (>= 5 full windows)"),
-     sel(Pd, "scored (>= 5 full windows)")],
-    ["pass haploidness and window count", sel(B, "pass haploidness and windows"), sel(Pd, "pass haploidness and windows")],
-    ["floors", sel_txt(B), sel_txt(Pd)],
-    ["selected nuclei", fi(len(B["cells"])), fi(len(Pd["cells"]))],
-    ["UMIs per selected nucleus, median", fi(B.get("umi_med")), fi(Pd.get("umi_med"))],
-    ["genes per selected nucleus, median", fi(B.get("genes_med")), fi(Pd.get("genes_med"))],
-    ["informative molecules per nucleus, median (IQR)",
-     "%s (%s–%s)" % (fi(B.get("selected_molecules_median")), fi(B.get("selected_molecules_q25")),
-                     fi(B.get("selected_molecules_q75"))),
-     "%s (%s–%s)" % (fi(Pd.get("selected_molecules_median")), fi(Pd.get("selected_molecules_q25")),
-                     fi(Pd.get("selected_molecules_q75")))],
-    ["weakest chromosome, molecules, median", fi(B.get("selected_weakest_chrom_molecules_median")),
-     fi(Pd.get("selected_weakest_chrom_molecules_median"))],
-    ["haploidness, median", ff(B.get("selected_haploidness_median"), 2), ff(Pd.get("selected_haploidness_median"), 2)],
-    ["%g Mb windows with a clean genotype call, %%" % WIN_MB, ff(100 * B.get("called_share", float("nan"))),
-     ff(100 * Pd.get("called_share", float("nan")))],
-    ["genotype similarity between nuclei, median (unrelated = 0.5)", ff(B.get("pair_sim_median"), 2),
-     ff(Pd.get("pair_sim_median"), 2)],
-    ["near-identical pairs (≥ 95% of ≥ 20 shared windows agree)",
-     "%s pairs among %s nuclei" % (B.get("dup_pairs", "–"), B.get("dup_cells", "–")),
-     "%s pairs among %s nuclei" % (Pd.get("dup_pairs", "–"), Pd.get("dup_cells", "–"))],
-    ["distinct genotypes if each near-identical group counts once", fi(B.get("distinct_genotypes")),
-     fi(Pd.get("distinct_genotypes"))]]))
-H.append(P("Near-identical pairs are most likely two nuclei from one pollen grain (vegetative and generative or sperm "
-           "nuclei come from one meiotic product and share its genotype). They are one meiosis observed twice and "
-           "should be counted once; collapsing them is listed under next steps."))
-if EXAMPLES:
-    H.append("<h3>One nucleus of median depth per species (hapCO's own plot, as used for manual review)</h3>")
-    H.append("<table class='plain'><tr>%s</tr></table>" % "".join(
-        "<td><b>%s</b> %s<br>%s</td>" % (NAME[sp], html.escape(bc), img(png, 100)) for sp, (bc, png) in EXAMPLES.items()))
-if BROWSER:
-    links = ["<a href='%s'>%s</a> (%s nuclei, %.0f MB)" % (os.path.basename(p), os.path.basename(p), len(ix),
-                                                            os.path.getsize(p) / 1e6)
-             for sp, v in BROWSER.items() if v for p, ix in [v]]
-    H.append(P("Every nucleus, one page each, sorted by crossovers per grain (most first): %s. Keep the PDFs in the "
-               "same folder as this page." % ", ".join(links)))
-    for sp, v in BROWSER.items():
-        if v:
-            H.append(details("%s: page index (page, barcode, crossovers, molecules, haploidness)" % NAME[sp],
-                             text="\n".join("%4d  %s  %3d  %6s  %s" % tuple(r) for r in v[1])))
+def section_4():
+    H.append("<h2>4. Cells: how many, how deep, how clean</h2>")
+    H.append(img(FIGS.get("cells")))
+    H.append(P("Doublets: two nuclei in one droplet carry both haplotypes, so their %s-molecule windows sit at 0, 0.5 "
+               "and 1 instead of 0 or 1, giving haploidness near 0.5 or below; the haploidness floor removes them, together "
+               "with diploid barcodes. This filter replaced the switch-rate filter used for <i>Cuscuta</i> and "
+               "<i>Spondias</i>: in these libraries most neighbouring markers sit on one read and agree automatically, "
+               "so the switch rate measured read clustering rather than doublets (rule select_cells)." % ff(HT_W, 0)))
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
+        ["barcodes tested / called", "%s / %s" % (fi(NUM.get("binata.barcodes_tested")), fi(NUM.get("binata.cells_called"))),
+         "%s / %s" % (fi(NUM.get("paradoxa.barcodes_tested")), fi(NUM.get("paradoxa.cells_called")))],
+        ["called barcodes with allele counts (cellsnp)", sel(B, "barcodes counted by cellsnp"),
+         sel(Pd, "barcodes counted by cellsnp")],
+        ["scored for haploidness (≥ %s windows of %s molecules)" % (ff(HT_MINWIN, 0), ff(HT_W, 0)),
+         sel(B, "scored (>= 5 full windows)"), sel(Pd, "scored (>= 5 full windows)")],
+        ["pass haploidness and window count", sel(B, "pass haploidness and windows"), sel(Pd, "pass haploidness and windows")],
+        ["floors", sel_txt(B), sel_txt(Pd)],
+        ["selected nuclei", fi(len(B["cells"])), fi(len(Pd["cells"]))],
+        ["UMIs per selected nucleus, median", fi(B.get("umi_med")), fi(Pd.get("umi_med"))],
+        ["genes per selected nucleus, median", fi(B.get("genes_med")), fi(Pd.get("genes_med"))],
+        ["informative molecules per nucleus, median (IQR)",
+         "%s (%s–%s)" % (fi(B.get("selected_molecules_median")), fi(B.get("selected_molecules_q25")),
+                         fi(B.get("selected_molecules_q75"))),
+         "%s (%s–%s)" % (fi(Pd.get("selected_molecules_median")), fi(Pd.get("selected_molecules_q25")),
+                         fi(Pd.get("selected_molecules_q75")))],
+        ["weakest chromosome, molecules, median", fi(B.get("selected_weakest_chrom_molecules_median")),
+         fi(Pd.get("selected_weakest_chrom_molecules_median"))],
+        ["haploidness, median", ff(B.get("selected_haploidness_median"), 2), ff(Pd.get("selected_haploidness_median"), 2)],
+        ["%g Mb windows with a clean genotype call, %%" % WIN_MB, ff(100 * B.get("called_share", float("nan"))),
+         ff(100 * Pd.get("called_share", float("nan")))],
+        ["genotype similarity between nuclei, median (unrelated = 0.5)", ff(B.get("pair_sim_median"), 2),
+         ff(Pd.get("pair_sim_median"), 2)],
+        ["near-identical pairs (≥ %s%% of ≥ %d windows called in both agree); expected among unrelated nuclei"
+         % (ff(100 * DUP_AGREE, 0), DUP_MIN), dup_txt(B), dup_txt(Pd)],
+        ["distinct genotypes if each near-identical group counts once (only where pairs exceed chance)",
+         fi(B.get("distinct_genotypes")) if dup_above_chance("binata") else "–",
+         fi(Pd.get("distinct_genotypes")) if dup_above_chance("paradoxa") else "–"]]))
+    H.append(P("Two nuclei of one pollen grain (vegetative and generative or sperm nuclei) come from one meiotic product and "
+               "share its genotype: one meiosis observed twice. Unrelated nuclei also agree by chance when the genome "
+               "segregates as few units, so the pairs are compared with shuffles that keep how the genome is linked "
+               "(nuclei shuffled independently per linkage group, the sequences inherited together in section 7): %s. "
+               "The crossover numbers count every nucleus." % "; ".join(dup_reading(sp) for sp in D)))
+    H.append("<h3>Dosage: is each sequence there once in each nucleus?</h3>")
+    H.append(P("For every nucleus and reference sequence, from the molecules hapCO reads (co_masks.py): <i>too few</i> = "
+               "fewer than %s molecules expected; <i>missing</i> = fewer than %s× the expected molecules; <i>doubled</i> = "
+               "neighbouring molecules switch allele in at least %s of steps (two copies interleaved) at ≥ %s× the "
+               "expected molecules; <i>mixed</i> = switching that often at normal coverage; otherwise <i>haploid</i>. "
+               "Expected = the nucleus's molecules × the sequence's median share across nuclei. A masked nucleus × "
+               "sequence (config mask_classes: %s in <i>D. binata</i>, %s in <i>D. paradoxa</i>) does not count for that "
+               "sequence and its calls there are dropped." % (ff(EXP_LOW, 0), ff(MISS_COV, 2), ff(SW_MIX, 2), ff(DBL_COV, 1),
+                                                              masked_classes(B), masked_classes(Pd))))
+
+    def dosage_rows():
+        out = []
+        for k in ("haploid", "doubled", "missing", "mixed", "too few"):
+            out.append(["nucleus × sequence: %s" % k] + [fi(D[sp]["masks"]["class"].eq(k).sum()) if "masks" in D[sp] else "–"
+                                                        for sp in D])
+        out.append(["masked"] + [fi(len(D[sp].get("masked_pairs", ()))) if "masks" in D[sp] else "–" for sp in D])
+        top = []
+        for sp in D:
+            d = D[sp]
+            if "masks" not in d:
+                top.append("–")
+                continue
+            m = d["masks"][d["masks"].masked == "yes"]
+            t = m.groupby("chrom")["class"].agg(lambda x: ", ".join("%s %d" % kv for kv in x.value_counts().items()))
+            cnt = m.chrom.value_counts()
+            top.append("; ".join("%s: %d (%s)" % (label(d, c), cnt[c], t[c]) for c in cnt.index[:4]) or "none")
+        out.append(["sequences with the most masked nuclei"] + top)
+        return out
+
+    if any("masks" in D[sp] for sp in D):
+        H.append(table(["", NAME["binata"], NAME["paradoxa"]], dosage_rows()))
+    if EXAMPLES:
+        H.append("<h3>One nucleus of median depth per species (hapCO's own plot, as used for manual review)</h3>")
+        H.append("<table class='plain'><tr>%s</tr></table>" % "".join(
+            "<td><b>%s</b> %s<br>%s</td>" % (NAME[sp], html.escape(bc), img(png, 100)) for sp, (bc, png) in EXAMPLES.items()))
+    if BROWSER:
+        links = ["<a href='%s'>%s</a> (%s nuclei, %.0f MB)" % (os.path.basename(p), os.path.basename(p), len(ix),
+                                                                os.path.getsize(p) / 1e6)
+                 for sp, v in BROWSER.items() if v for p, ix in [v]]
+        H.append(P("Every nucleus, one page each, sorted by crossovers per grain (most first): %s. Keep the PDFs in the "
+                   "same folder as this page." % ", ".join(links)))
+        for sp, v in BROWSER.items():
+            if v:
+                H.append(details("%s: page index (page, barcode, crossovers, molecules, haploidness)" % NAME[sp],
+                                 text="\n".join("%4d  %s  %3d  %6s  %s" % tuple(r) for r in v[1])))
+
+
+run_section('section 4', section_4)
 
 # ---- 5
-H.append("<h2>5. Crossover calling: settings and checks</h2>")
-cc = CFG.get("co_calling", {})
-meaning = [("input_rows", "what a block counts: molecules = informative markers on one read, counted once"),
-           ("block_size", "minimum length of a haplotype block, bp"),
-           ("marker_num", "minimum molecules in a block"),
-           ("terminal_marker_num", "molecules needed by a chromosome's first and last block (no length rule there)"),
-           ("base_af", "smoothing threshold, pass 1"), ("window_af", "smoothing threshold, pass 2"),
-           ("genotype", "ALT share that decides a block's genotype")]
+def section_5():
+    H.append("<h2>5. Crossover calling: settings chosen from a review of the calls</h2>")
+
+    def port_txt(sp):
+        pc = D[sp].get("port_check")
+        if not pc:
+            return "<i>%s</i>: no check log, logs/%s_sweep_check.log" % (NAME[sp], D[sp]["S"])
+        return "<i>%s</i> identical in %s of %s nuclei at %s, logs/%s_sweep_check.log" % (
+            NAME[sp], fi(pc[0]), fi(pc[1]), pc[2], D[sp]["S"])
+    H.append(P("hapCO smooths each nucleus's molecules into haplotype blocks and calls a crossover where the block "
+               "genotype switches; the settings in the table below decide which blocks count. For each species a sample "
+               "of nuclei was called at every combination of the swept values by co_sweep.py, hapCO re-implemented in "
+               "Python (checked against the R's own calls at the settings the pipeline ran with: %s); calls of the same switch "
+               "were pooled into candidate crossovers ('events'), and each event was judged on a review page "
+               "(review_page.py): accepted automatically when at least %s%% of the settings call it with at least %s "
+               "molecules at ≥ %s%% purity on each side (review_page.py's defaults), otherwise judged by eye as real, "
+               "false or unsure. Every setting is then scored against the verdicts (score_verdicts.py): TP = real events "
+               "it calls, FP = false events it calls, FN = real events it misses (and crossovers no setting called, "
+               "marked by hand); precision = TP/(TP+FP), recall = TP/(TP+FN), F1 = 2·precision·recall/(precision+recall); "
+               "95%% intervals from resampling the reviewed nuclei."
+               % ("; ".join(port_txt(sp) for sp in D), ff(100 * AUTO_FRAC, 0), ff(AUTO_SUP, 0), ff(100 * AUTO_PUR, 0))))
+
+    def rv_cell(d, f):
+        try:
+            return f(d.get("rv", {}))
+        except (KeyError, TypeError, AttributeError, ValueError):
+            return "–"
+
+    def grid_txt(rv):
+        g = rv["grid"]
+        return "%d: base_af %s × marker_num %s × block_size %s Mb × terminal_marker_num %s" % (
+            rv["n_settings"], "/".join("%g" % v for v in g["base_af"]), "/".join("%g" % v for v in g["marker_num"]),
+            "/".join("%g" % (v / 1e6) for v in g["block_size"]), "/".join("%g" % v for v in g["terminal_marker_num"]))
+
+    def best_share(d):
+        r = score_row(d, d.get("rv", {}).get("chosen"))
+        return "%s%% of resamples" % ff(100 * r.best_share, 0) if r is not None and "best_share" in r else "–"
+
+    rows5 = [("review page (docs/co_review)", lambda rv: "page %s: %s nuclei with at least one event" % (rv["page"],
+                                                                                                      fi(rv["cells"]))),
+             ("settings swept", grid_txt),
+             ("candidate crossovers (events)", lambda rv: fi(rv["events"])),
+             ("accepted automatically as real", lambda rv: fi(rv["auto"].get("real", 0))),
+             ("judged by eye: real / false / unsure", lambda rv: "%s / %s / %s" % (
+                 fi(rv["eye"].get("real", 0)), fi(rv["eye"].get("false", 0)), fi(rv["eye"].get("unsure", 0)))),
+             ("not scored: unsure; no verdict; on a sequence masked in the review or in a nucleus marked bad",
+              lambda rv: "%s; %s; %s" % (fi(rv["eye"].get("unsure", 0)), fi(rv["none"]), fi(rv["on_masked"]))),
+             ("crossovers no setting called, marked by hand", lambda rv: fi(rv["missed"])),
+             ("calls scored", lambda rv: rv["mode"] + ("; the molecules in %s left out" % rv["recall_excl"]
+                                                      if rv.get("recall_excl") else "")),
+             ("scores written (qc/co_review/<sample>/scores.tsv)", lambda rv: rv["scores_time"])]
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]],
+                   [[lab, rv_cell(B, f), rv_cell(Pd, f)] for lab, f in rows5] +
+                   [["settings used before the review", f1_txt(B, "previous", True), f1_txt(Pd, "previous", True)],
+                    ["settings chosen", f1_txt(B, "chosen", True), f1_txt(Pd, "chosen", True)],
+                    ["chosen settings tie for the best F1 in", best_share(B), best_share(Pd)]]))
+    H.append(img(FIGS.get("review")))
+    H.append(P("What to look for: the chosen value (large dot) at or near the top of each panel, and how flat the top is: "
+               "a flat top means the result does not hinge on the exact value. The dashed line is the F1 of the settings "
+               "used before. Hollow points make calls the review never saw (+n per point): those calls are not scored, "
+               "so their F1 is optimistic. Values outside the swept grid were re-called from the pipeline's own tables "
+               "and matched to the reviewed events (score_verdicts.py --extra)."))
+    cc_rows = [("input_rows", "what a block counts: molecules = informative markers on one read, counted once"),
+               ("block_size", "minimum length of an interior haplotype block, bp"),
+               ("marker_num", "minimum molecules in a block"),
+               ("terminal_marker_num", "molecules needed by a chromosome's first and last block (no length rule there)"),
+               ("base_af", "smoothing threshold, pass 1"), ("window_af", "smoothing threshold, pass 2"),
+               ("genotype", "ALT share that decides a block's genotype"),
+               ("mask_classes", "dosage classes whose nucleus × sequence is masked (section 4)")]
+
+    def cfg_val(sp, k):
+        v = (CC.get(D[sp]["species"]) or {}).get(k, "–")
+        return ", ".join(v) if isinstance(v, list) else v
+
+    H.append(table(["hapCO setting", "meaning", NAME["binata"], NAME["paradoxa"]],
+                   [[k, m, cfg_val("binata", k), cfg_val("paradoxa", k)] for k, m in cc_rows] +
+                   [["exclusions", "stretches left out of the molecule tables (config/exclude_regions)",
+                     excl_txt(B, dropped=False), excl_txt(Pd, dropped=False)],
+                    ["stamped", "config _approved: date of the decision (docs/decisions.md)",
+                     B.get("rv", {}).get("stamp_date", "–"), Pd.get("rv", {}).get("stamp_date", "–")]]))
+    for sp, d in D.items():
+        if d.get("rv", {}).get("notes"):
+            H.append(details("%s: verdicts changed after a second look (listed in docs/co_review/%s_verdicts.csv)"
+                             % (NAME[sp], d["S"]), text="\n".join(l.lstrip("# ") for l in d["rv"]["notes"])))
+    H.append("<h3>Crossovers called</h3>")
+    H.append(img(FIGS.get("per_grain")))
+
+    def below_half_txt(d):
+        bh = d.get("below_half")
+        if bh is None:
+            return "–"
+        return "%d of %d%s" % (len(bh), len(d["main"]), (": " + ", ".join("%s %s" % (short(c), ff(d["per_chrom"][c], 3))
+                                                                             for c in bh)) if bh else "")
+
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
+        ["grains", fi(B.get("ncell_co")), fi(Pd.get("ncell_co"))],
+        ["crossovers (after the dosage masks)", fi(B.get("co_total")), fi(Pd.get("co_total"))],
+        ["calls dropped by the dosage masks", fi(B.get("masked_calls")), fi(Pd.get("masked_calls"))],
+        ["per grain, mean (SD); median", "%s (%s); %s" % (ff(B.get("co_mean"), 2), ff(B.get("co_sd"), 2),
+                                                          ff(B.get("co_median"), 0)),
+         "%s (%s); %s" % (ff(Pd.get("co_mean"), 2), ff(Pd.get("co_sd"), 2), ff(Pd.get("co_median"), 0))],
+        ["genetic map length, cM", fi(B.get("map_cm")), fi(Pd.get("map_cm"))],
+        ["one crossover per bivalent gives, per grain on average (n / 2)", ff(B["n"] / 2), ff(Pd["n"] / 2)],
+        ["grains with fewer than n / 2: observed / expected if every bivalent had exactly one crossover",
+         "%s / %s of %s" % (fi(B.get("below_obligate")), ff(B.get("below_obligate_exp"), 1), fi(B.get("ncell_co"))),
+         "%s / %s of %s" % (fi(Pd.get("below_obligate")), ff(Pd.get("below_obligate_exp"), 1), fi(Pd.get("ncell_co")))],
+        ["chromosomes below 0.5 crossovers per grain (pieces summed)", below_half_txt(B), below_half_txt(Pd)],
+        ["crossover interval, median kb (resolution)", fi(B.get("width_median_kb")), fi(Pd.get("width_median_kb"))]]))
+    H.append(P("A crossover involves two of the four chromatids, so a bivalent with exactly one crossover passes it to "
+               "half of the pollen: with one per bivalent, a grain carries n / 2 on average and many carry fewer by chance "
+               "(the expected count above); the test that every bivalent gets one is per chromosome: at least 0.5 per "
+               "grain. Crossovers per grain counts every crossover of a nucleus; the genetic map sums, over sequences, the "
+               "crossovers per nucleus that counts for each, so a masked sequence does not pull it down. <i>D. paradoxa</i> "
+               "nuclei carry %s informative molecules against %s in <i>D. binata</i> (medians), so its crossovers are placed "
+               "less precisely (median interval %s kb against %s kb)."
+               % (fi(Pd.get("selected_molecules_median")), fi(B.get("selected_molecules_median")),
+                  fi(Pd.get("width_median_kb")), fi(B.get("width_median_kb")))))
 
 
-def status(sp):
-    a = str((cc.get(D[sp]["species"]) or {}).get("_approved", "–"))
-    return a.split("|")[0].strip() + (": " + a.split("|", 1)[1].strip() if "|" in a else "")
-
-
-H.append(table(["hapCO setting", "meaning", NAME["binata"], NAME["paradoxa"]],
-               [[k, m, (cc.get(B["species"]) or {}).get(k, "–"), (cc.get(Pd["species"]) or {}).get(k, "–")]
-                for k, m in meaning] + [["status", "when and how the settings were chosen", status("binata"),
-                                         status("paradoxa")]]))
-H.append(img(FIGS.get("per_grain")))
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
-    ["grains", fi(B.get("ncell_co")), fi(Pd.get("ncell_co"))],
-    ["crossovers", fi(B.get("co_total")), fi(Pd.get("co_total"))],
-    ["per grain, mean (SD); median", "%s (%s); %s" % (ff(B.get("co_mean"), 2), ff(B.get("co_sd"), 2), ff(B.get("co_median"), 0)),
-     "%s (%s); %s" % (ff(Pd.get("co_mean"), 2), ff(Pd.get("co_sd"), 2), ff(Pd.get("co_median"), 0))],
-    ["crossovers within 10 Mb of the chr1/chr2 joins (%s), observed / expected at the chromosome's average"
-     % ("joins the pollen do not support: reference artefact" if Pd["S"] in ARTEFACT_JOINS
-        else "joined as the pollen inherit them: no excess expected"),
-     "–", "%s / %s" % (fi(Pd.get("at_join_cos")), ff(Pd.get("at_join_exp"), 1)) if "at_join_cos" in Pd else "–"],
-    ["per grain without them", "–", ff(Pd.get("co_mean_nj"), 2) if "co_mean_nj" in Pd else "not applicable"],
-    ["obligate minimum per grain (n / 2)", ff(B["n"] / 2), ff(Pd["n"] / 2)],
-    ["grains below the minimum", "%s of %s" % (fi(B.get("below_obligate")), fi(B.get("ncell_co"))),
-     "%s of %s" % (fi(Pd.get("below_obligate")), fi(Pd.get("ncell_co")))],
-    ["chromosomes below 0.5 per grain", "%s of %d" % (len(B.get("below_half", [])), B["n"]),
-     "%s of %d" % (len(Pd.get("below_half", [])), Pd["n"])],
-    ["crossover interval, median kb (resolution)", fi(B.get("width_median_kb")), fi(Pd.get("width_median_kb"))]]))
-H.append(P("<i>D. paradoxa</i> nuclei carry %s informative molecules against %s in <i>D. binata</i> (medians), so its "
-           "crossovers are placed less precisely (median interval %s kb against %s kb) and a nucleus with few molecules "
-           "on a chromosome can miss one; its settings are binata's, not yet tuned."
-           % (fi(Pd.get("selected_molecules_median")), fi(B.get("selected_molecules_median")),
-              fi(Pd.get("width_median_kb")), fi(B.get("width_median_kb")))))
+run_section('section 5', section_5)
 
 # ---- 6
-H.append("<h2>6. Landscapes</h2>")
-H.append(img(FIGS.get("landscape")))
-rows6 = [["crossovers: ends vs middle", B["shape"], Pd["shape"]]]
-if "shape_nj" in Pd:
-    rows6.append(["crossovers without the join artefact", "–", Pd["shape_nj"]])
-rows6 += [["good markers: ends vs middle", ff(B.get("U_markers"), 2), ff(Pd.get("U_markers"), 2)],
-          ["genes: ends vs middle", ff(B.get("U_genes"), 2), ff(Pd.get("U_genes"), 2)],
-          ["crossovers vs good markers per 5 Mb window, Spearman", ff(B.get("rho_markers"), 2), ff(Pd.get("rho_markers"), 2)]]
-H.append(table(["", NAME["binata"], NAME["paradoxa"]], rows6))
-H.append(P("'Ends vs middle' = density in the outer 20%% of each chromosome (10%% at each end) over the inner 60%%; "
-           "1 = flat. Markers follow genes, so the same ratio for markers and genes shows how much end bias detection "
-           "alone could make: in <i>D. binata</i> crossovers are %s× end-biased against %s× for markers, so the U is "
-           "not a detection artefact, although crossovers do track marker density window by window (Spearman %s)."
-           % (ff(B.get("land", {}).get("U")), ff(B.get("U_markers")), ff(B.get("rho_markers"), 2))))
-H.append("<h3>Busiest 5 Mb windows (Poisson p against the genome-wide mean per window)</h3>")
-for sp, d in D.items():
-    if d.get("busiest"):
-        H.append("<p><b>%s</b> (mean %s crossovers per window)</p>" % (NAME[sp], ff(d["window_mean"])))
-        H.append(table(["chromosome", "Mb", "crossovers", "expected", "p", "within 10 Mb of a join"], d["busiest"]))
-H.append(img(FIGS.get("per_chrom")))
-H.append("<h3>Crossover interference</h3>")
-H.append(img(FIGS.get("interference")))
-H.append(P("For every nucleus and chromosome with two or more crossovers, the distance between neighbouring crossovers "
-           "as a share of the chromosome; the line is what the same crossovers would give if placed independently "
-           "(drawn from that chromosome's crossover positions, 300 times; band = 95%%). Interference shows as too few "
-           "close pairs. Closer than 20%% of the chromosome: <i>D. binata</i> %s× expected (%s pairs), "
-           "<i>D. paradoxa</i> %s× (%s pairs%s). This replaces the coefficient-of-"
-           "coincidence curve, which needs more double crossovers than <i>D. paradoxa</i>'s %s nuclei give."
-           % (ff(B.get("intf", {}).get("ratio"), 2), B.get("intf", {}).get("pairs", "–"),
-              ff(Pd.get("intf", {}).get("ratio"), 2), Pd.get("intf", {}).get("pairs", "–"),
-              "; crossovers at the joins left out" if Pd["S"] in ARTEFACT_JOINS else "", fi(Pd.get("ncell_co")))))
-if FIGS.get("structure"):
-    H.append("<h3><i>D. paradoxa</i>: crossovers along each chromosome against the structure of its homolog</h3>")
-    H.append(img(FIGS.get("structure")))
-    H.append(P("Under each chromosome: where the other haplotype's copy aligns to it (hap2 on hap1, synteny blocks from "
-               "translocation_map.py), collinear, inverted or from a differently numbered chromosome, and where nothing "
-               "aligns. Black bars: stretches without a crossover in any of the %s nuclei, long enough to be unlikely by "
-               "chance (table below). Arm colours as in the chr1/chr2 diagram. On %s the arms beyond the joins "
-               "(%s) have no partner in the other haplotype by construction: their partners are the other chr1/chr2 "
-               "homolog (section 7)." % (fi(Pd.get("ncell_co")), join_names(Pd["S"])[0], join_names(Pd["S"])[2])))
-if Pd.get("dead") is not None:
-    dc = Pd["dead_chance"]
-    H.append(P("<b>Stretches without crossovers</b>%s. With %s crossovers per grain, "
-               "gaps up to %d Mb arise by chance, so only stretches of at least %d Mb are listed: %d, %s Mb in total, "
-               "against %s expected if the same crossovers fell uniformly along each chromosome (95%% range %s–%s). "
-               "What each overlaps:"
-               % (" (crossovers at the joins left out)" if Pd["S"] in ARTEFACT_JOINS else "",
-                  ff(Pd.get("co_mean_nj", Pd.get("co_mean")), 2), Pd["dead_thr"] - 5, Pd["dead_thr"], len(Pd["dead"]),
-                  ff(Pd["dead_mb"], 0), ff(dc[0]), ff(dc[1], 0), ff(dc[2], 0))))
-    H.append(table(["chromosome", "Mb", "length, Mb", "inverted, %", "translocated, %", "no homolog, %",
-                    "markers vs chromosome median", "contains a join", "most likely reason"], Pd["dead"]))
+def section_6():
+    H.append("<h2>6. Landscapes</h2>")
+    H.append(img(FIGS.get("landscape")))
+    H.append(table(["", NAME["binata"], NAME["paradoxa"]], [
+        ["crossovers: ends vs middle", B["shape"], Pd["shape"]],
+        ["good markers: ends vs middle", ff(B.get("U_markers"), 2), ff(Pd.get("U_markers"), 2)],
+        ["genes: ends vs middle", ff(B.get("U_genes"), 2), ff(Pd.get("U_genes"), 2)],
+        ["crossovers vs good markers per 5 Mb window, Spearman", ff(B.get("rho_markers"), 2), ff(Pd.get("rho_markers"), 2)]]))
+    H.append(P("'Ends vs middle' = density in the outer 20%% of each chromosome (10%% at each end) over the inner 60%%; "
+               "1 = flat. Positions are along the chromosomes, with the pieces of a cut reference put back in place. "
+               "Markers follow genes, so the same ratio for markers and genes shows how much end bias detection alone "
+               "could make: the ratio is %s for crossovers against %s for markers in <i>D. binata</i>, and %s against %s "
+               "in <i>D. paradoxa</i>; crossovers also track marker density window by window (Spearman %s and %s)."
+               % (fg(B.get("land", {}).get("U")), fg(B.get("U_markers")), fg(Pd.get("land", {}).get("U")),
+                  fg(Pd.get("U_markers")), ff(B.get("rho_markers"), 2), ff(Pd.get("rho_markers"), 2))))
+    H.append("<h3>Busiest 5 Mb windows (Poisson p against the genome-wide mean per window)</h3>")
+    for sp, d in D.items():
+        if d.get("busiest"):
+            nw = sum(int(math.ceil(d["L"][c] / 5e6)) for c in d["main"])
+            H.append("<p><b>%s</b> (mean %s crossovers per window; the 6 busiest of %s windows, so p must be below "
+                     "%.1e to stand out after testing them all)</p>" % (NAME[sp], ff(d["window_mean"]), fi(nw), 0.05 / nw))
+            H.append(table(["chromosome", "Mb", "crossovers", "expected", "p"], d["busiest"]))
+    H.append(img(FIGS.get("per_chrom")))
+    H.append(P("Each bar: crossovers per grain on one chromosome; for a cut reference the pieces are stacked, each "
+               "divided by the nuclei that count for that piece (dosage masks). The dashed line is 0.5: below it, fewer "
+               "than one crossover per bivalent (a crossover involves two of the four chromatids, so one per bivalent "
+               "reaches half of the pollen)."))
+    H.append("<h3>Crossover interference</h3>")
+    H.append(img(FIGS.get("interference")))
+    H.append(P("For every nucleus and chromosome with two or more crossovers, the distance between neighbouring crossovers "
+               "as a share of the chromosome; the line is what the same crossovers would give if placed independently "
+               "(drawn from that chromosome's crossover positions, 300 times; band = 95%%). Interference shows as too few "
+               "close pairs. Closer than 20%% of the chromosome: <i>D. binata</i> %s× expected (%s pairs), "
+               "<i>D. paradoxa</i> %s× (%s pairs). This replaces the coefficient-of-coincidence curve, which needs more "
+               "double crossovers than <i>D. paradoxa</i>'s %s nuclei give."
+               % (ff(B.get("intf", {}).get("ratio"), 2), B.get("intf", {}).get("pairs", "–"),
+                  ff(Pd.get("intf", {}).get("ratio"), 2), Pd.get("intf", {}).get("pairs", "–"), fi(Pd.get("ncell_co")))))
+    if FIGS.get("structure"):
+        H.append("<h3><i>D. paradoxa</i>: crossovers along each chromosome against the structure of its homolog</h3>")
+        H.append(img(FIGS.get("structure")))
+        H.append(P("Under each chromosome: the pieces it was cut into for crossover calling, and where the other "
+                   "haplotype's copy aligns to it (hap2 on hap1, synteny blocks from translocation_map.py): collinear, "
+                   "inverted or from a differently numbered chromosome, and where nothing aligns. Black bars: stretches "
+                   "without a crossover in any of the %s nuclei, long enough to be unlikely by chance (table below)."
+                   % fi(Pd.get("ncell_co"))))
+    if Pd.get("dead") is not None:
+        dc = Pd["dead_chance"]
+        H.append(P("<b>Stretches without crossovers.</b> With %s crossovers per grain, gaps up to %d Mb arise by chance, "
+                   "so only stretches of at least %d Mb are listed: %d, %s Mb in total, against %s expected if the same "
+                   "crossovers fell uniformly along each chromosome (95%% range %s–%s). What each overlaps:"
+                   % (ff(Pd.get("co_mean"), 2), Pd["dead_thr"] - 5, Pd["dead_thr"], len(Pd["dead"]), ff(Pd["dead_mb"], 0),
+                      ff(dc[0]), ff(dc[1], 0), ff(dc[2], 0))))
+        H.append(table(["chromosome", "Mb", "length, Mb", "inverted, %", "translocated, %", "no homolog, %",
+                        "markers vs chromosome median", "contains a cut", "most likely reason"], Pd["dead"]))
+
+
+run_section('section 6', section_6)
 
 # ---- 7
-H.append("<h2>7. Is each reference right?</h2>")
-H.append(P("Left, pollen linkage: for every pair of %g Mb windows, r = share of nuclei whose genotypes disagree (0 = "
-           "always inherited together, 0.5 = independent), shown as 1 − 2r; in a correct reference each chromosome is "
-           "one dark block on the diagonal and everything off it is pale. Right, Hi-C on the same chromosomes, raw "
-           "contacts on a log scale from white (the typical contact between two different chromosomes) to red: each "
-           "chromosome of the plant's tissue is one red square. A misassembly would break a square or put a red block "
-           "off the diagonal. Hi-C reads come from one chromosome copy at a time, so a translocation between the two "
-           "copies cannot show here; it shows in the pollen (off-diagonal blocks on the left) and in the map on both "
-           "haplotypes below." % WIN_MB))
-for sp in D:
-    H.append("<h3>%s</h3>" % NAME[sp])
-    H.append(img(FIGS.get("linkhic_" + sp)))
-    H.append(details("linkage scan summary", "qc/linkage/%s/linkage_summary.txt" % D[sp]["S"]))
-if FIGS.get("hic_dual"):
-    H.append("<h3><i>D. paradoxa</i>: Hi-C on both haplotypes</h3>")
-    H.append(img(FIGS.get("hic_dual"), 80))
-    H.append(P("Reads that fit either copy of a sequence put contacts between the two copies, so homologous "
-               "sequence on two chromosomes shows as a red line off the diagonal: for an ordinary pair (chr3 h1 and "
-               "chr3 h2, say) one line through their block. Right, chromosomes 1 and 2 with their arms coloured as in "
-               "the diagram below: if the tissue chromosomes are as assembled, L1 links A with C, L2 links B with D, "
-               "P links A with B and Q links C with D, so each line changes partner at a dotted join."))
-H.append("<h3><i>D. paradoxa</i>: chromosomes 1 and 2 in the tissue and in the pollen</h3>")
-H.append(img(FIGS.get("diagram")))
-H.append(P("Names: L1 and L2 are the left arms of chr1 and chr2, P and Q the right arms; each arm exists twice. "
-           "A, B, C and D are the four assembled chromosomes; the crossover reference used here (%s) contains %s "
-           "plus chr3–6 hap1. Hi-C supports all four as continuous molecules, yet the pollen inherit L1 with Q and L2 "
-           "with P. Window pairs behind the diagram (measured on A + D):" % (Pd["S"], join_names(Pd["S"])[1])))
+def section_7():
+    H.append("<h2>7. Is each reference right? What the pollen inherit together</h2>")
+    H.append(P("A reference agrees with the pollen when the windows of one chromosome are inherited together (only a "
+               "crossover separates them) and windows of different chromosomes independently. For every two %g Mb "
+               "windows, φ (phi) is the correlation of their genotypes across nuclei: 0 = inherited independently, ±1 = "
+               "always together; the sign only says which allele of one goes with which of the other, and depends on which "
+               "haplotype each sequence was taken from. Genotypes as in section 4 (≥ %d molecules, ≥ %s%% of them one "
+               "allele), a nucleus × sequence masked for dosage left out, and at least %d nuclei with both windows; %s. "
+               "Chance level: the nuclei are shuffled independently for each sequence, which keeps each sequence's own "
+               "linkage and breaks any between sequences; in 95%% of %d shuffles the strongest pair of sequences stays "
+               "below the level given (so fewer than one pair in 20 reports passes it by chance)."
+               % (WIN_MB, MIN_MOL, ff(100 * GT_MAJ, 0), PHI_N, "; ".join(
+                   "<i>%s</i>: %s" % (NAME[sp], "one nucleus per group of near-identical nuclei, %s of %s (more pairs "
+                                      "than chance, section 4; chance pairs go too, so this loses some real meioses)"
+                                      % (fi(D[sp]["phi_nuclei"]), fi(len(D[sp]["cells"])))
+                                      if D[sp].get("phi_one_per_group") else "all %s nuclei" % fi(D[sp]["phi_nuclei"]))
+                   for sp in D if "phi" in D[sp]), NPERM)))
+    H.append(img(FIGS.get("pairs")))
+    for sp, d in D.items():
+        if "co_pairs" not in d:
+            continue
+        H.append("<p><b>%s</b>: %d of %d pairs of sequences inherited together above chance (|φ| > %s)%s</p>" % (
+            NAME[sp], len(d["co_pairs"]), len(d["seqs"]) * (len(d["seqs"]) - 1) // 2, ff(d["fw_thr"], 2),
+            ":" if d["co_pairs"] else "."))
+        if d["co_pairs"]:
+            H.append(table(["sequences", "strongest φ", "at (Mb on each chromosome)", "nuclei", "chance level for this pair",
+                            "shuffles as strong (any pair)", "what the assembly says"],
+                           [["%s × %s" % (label(d, r["a"]), label(d, r["b"])), "%+.2f" % r["phi"],
+                             "%s–%s / %s–%s" % (ff(r["wa"][0], 0), ff(r["wa"][1], 0), ff(r["wb"][0], 0),
+                                                ff(r["wb"][1], 0)), fi(r["n"]), ff(r["chance"], 2),
+                             "%d of %d" % (r["as_strong"], NPERM), r["why"]] for r in d["co_pairs"]]))
+    exp = []
+    for sp, d in D.items():
+        if not d.get("expected_pairs"):
+            continue
+        miss = d.get("expected_missing", [])
+        exp.append("<i>%s</i>: %s" % (NAME[sp], "all %d such pairs are above chance" % d["expected_pairs"] if not miss else
+                                      "%d of %d are above chance; not: %s" % (
+                                          d["expected_pairs"] - len(miss), d["expected_pairs"], "; ".join(
+                                              "%s × %s (|φ| %s; %s)" % (label(d, r["a"]), label(d, r["b"]),
+                                                                       ff(r["absphi"], 2), r["why"]) for r in miss))))
+    H.append(P("How to read it: pieces cut from one chromosome, and a piece with the chromosome its copy in the other "
+               "haplotype lies on (a translocation the assembly shows), should be inherited together%s. Pairs linked "
+               "only through such a piece follow from the two. A pair the assembly does not explain is a question for "
+               "the assembly or the biology; expected linkage that is missing would point at the cut reference."
+               % ((": " + "; ".join(exp)) if exp else "")))
+    H.append(img(FIGS.get("phi_maps")))
+    H.append(P("Every window against every other. What to look for: in a correct reference each chromosome is one dark "
+               "block on the diagonal, fading away from the diagonal where crossovers separate distant windows, and "
+               "everything off the blocks is pale; a misjoin breaks a block, and two chromosomes inherited together light "
+               "up the block where they cross."))
+    if FIGS.get("phi_zoom"):
+        H.append(img(FIGS.get("phi_zoom")))
+        H.append(P("Two chromosomes inherited together, window by window (axes in Mb along each chromosome; pieces put "
+                   "back in place). What to look for: two chromosomes joined end to end would be linked most strongly next "
+                   "to the joined ends, fading with distance; a translocation the assembly knows of shows the same from "
+                   "the exchanged stretch. Linkage between the middles of two chromosomes while all their ends recombine "
+                   "freely is what a reciprocal exchange between them in one parent, with breakpoints in the middles, "
+                   "would give (the exchanged chromosomes travel together through meiosis); selection against pollen with "
+                   "some combinations would also link them. Physical evidence decides: Hi-C (below), HiFi reads across "
+                   "the junctions, cytology."))
+    if FIGS.get("hic_dual"):
+        H.append("<h3><i>D. paradoxa</i>: Hi-C on both haplotypes</h3>")
+        H.append(img(FIGS.get("hic_dual"), 90))
+        H.append(P("Reads that fit either copy of a sequence put contacts between the two copies, so homologous sequence "
+                   "on two chromosomes shows as a red line off the diagonal: for an ordinary pair (chr3 h1 and chr3 h2, "
+                   "say) one line through their block. Hi-C reads come from one chromosome molecule at a time, so they "
+                   "show how the tissue's chromosomes are built, not how the pollen inherit them."))
+        rk = Pd.get("hic_rank", {})
+        foc = [(k, v) for k, v in sorted(rk.items(), key=lambda kv: kv[1][1])
+               if short(k[0]) in Pd.get("hic_focus", []) and short(k[1]) in Pd.get("hic_focus", [])]
+        if foc:
+            H.append(P("Contacts between %s copies, per bin pair, against the median of all %d pairs of chromosome copies "
+                       "that are not homologs (2 Mb bins, %s): %s. What to look for: if the tissue carried %s material "
+                       "joined in a way the assembly does not have, reads would connect them: a red block between the "
+                       "copies in the map, and that pair at the top of this ranking. Shared repeats raise contacts too, so "
+                       "a high rank alone is not a join."
+                       % (" and ".join(Pd["hic_focus"]), Pd["hic_npairs"], Pd.get("hic_rank_src", "?"),
+                          "; ".join("%s × %s %s× (rank %d)" % (a.replace("_hap", " h"), b.replace("_hap", " h"), ff(x, 2), r)
+                                    for (a, b), (x, r) in foc), " and ".join(Pd["hic_focus"]))))
+    H.append("<h3>Assembly flags found while choosing the settings</h3>")
+    fl = []
+    for sp, d in D.items():
+        for r in d.get("excl", []):
+            fl.append([NAME[sp], "%s:%s–%s" % (r["chrom"], fi(r["start"]), fi(r["end"])), r.get("reason", ""),
+                       "left out of the molecule tables (%s molecules dropped); picked by hand during the review, to be "
+                       "replaced by an automatic filter" % fi(d.get("excl_dropped"))])
+    if fl:
+        H.append(table(["species", "stretch", "evidence (%s)" % ", ".join(d["excl_file"] for d in D.values() if
+                                                                           d.get("excl_file")), "what was done"], fl))
+    H.append(P("Other places noted in the decision entries below (a few molecules that follow another place in the "
+               "genome, a stretch where the assembly's phase switches) are listed there and not masked."))
+    dec = "docs/decisions.md"
+    if have(dec):
+        ents = re.split(r"\n(?=## )", open(dec).read())
+        for sp, d in D.items():
+            hit = [e for e in ents if e.startswith("## ") and NAME[sp] in e.split("\n", 1)[0] and
+                   "crossover calling" in e.split("\n", 1)[0]]
+            if hit:
+                H.append(details("%s: decision entry for the crossover-calling settings (docs/decisions.md)" % NAME[sp],
+                                 text=hit[-1].strip()))
+    for sp, d in D.items():
+        if d.get("unexplained"):
+            p = "qc/linkage/Dparadoxa_std/chr5_chr6_check.txt"
+            if sp == "paradoxa" and any({short(d["src"][r["a"]][0]), short(d["src"][r["b"]][0])} == {"chr5", "chr6"}
+                                        for r in d["unexplained"]) and os.path.exists(p):
+                H.append(details("earlier check of chr5 against chr6 (pollen linkage on Dparadoxa_std, where chr5_hap1 and "
+                                 "chr6_hap1 are the same sequences; hap2-on-hap1 alignment)", p))
+    prev = []
+    for p in [x.strip() for x in A.previous.split(",") if x.strip()]:
+        if os.path.exists(p):
+            USED.append(p)
+            m = re.search(r"Generated ([\d-]+ [\d:]+) from CO_smk commit (\w+)", open(p, errors="replace").read())
+            prev.append("%s (generated %s from commit %s)" % (p, m.group(1), m.group(2)) if m else p)
+    H.append(P("Not repeated here: earlier versions of this report called <i>D. paradoxa</i> on two joined references, "
+               "chr1 and chr2 as the tissue's assembly joins them (A + D, Dparadoxa_std) and as the pollen inherit their "
+               "arms (C + B, Dparadoxa_CB), and compared them join by join (arm diagram, crossovers at the joins, rDNA "
+               "and Hi-C libraries at the joins), with a pollen-linkage and Hi-C map on each crossover reference (both "
+               "species) and the rDNA arrays. The cut reference used here needs no join, so that comparison does not "
+               "change the counts; it is kept in %s." % (" and ".join(html.escape(x) for x in prev) if prev else
+                                                         "the version-4 report (reports/supervisor_CB/report.html)")))
 
 
-def binom_p(k, n):
-    pk = [math.comb(n, i) * 0.5 ** n for i in range(n + 1)]
-    return min(1.0, sum(p for p in pk if p <= pk[k] * (1 + 1e-9)))
-
-
-if PAIRS:
-    prow = []
-    for lab, v in PAIRS:
-        rr, ra, ar, aa, n, r = int(v[0]), int(v[1]), int(v[2]), int(v[3]), int(v[4]), float(v[5])
-        r1, r2 = rr + ra, rr + ar
-        e_same = (r1 * r2 + (n - r1) * (n - r2)) / max(n, 1)
-        reading = "inherited together" if r <= 0.15 else ("independent" if r >= 0.35 else "partly linked")
-        prow.append([lab, rr, ra, ar, aa, n, "%.2f" % r, "%d / %.1f" % (rr + aa, e_same),
-                     "%d:%d (p %.2g)" % (r1, n - r1, binom_p(r1, n)), "%d:%d (p %.2g)" % (r2, n - r2, binom_p(r2, n)),
-                     reading])
-    H.append(table(["window pair", "REF-REF", "REF-ALT", "ALT-REF", "ALT-ALT", "nuclei", "r",
-                    "same-type pairs: observed / expected if independent", "window 1 REF:ALT (p)",
-                    "window 2 REF:ALT (p)", "reading"], prow))
-    H.append(P("How to read it: when two windows are inherited independently all four classes appear, including the "
-               "two that look like an intact tissue chromosome (REF-REF and ALT-ALT), and they appear about as often as "
-               "chance predicts (the 'observed / expected if independent' column). When they are inherited together "
-               "only REF-REF and ALT-ALT appear. So nuclei that carry A's L1 with A's P exist, but no more often than "
-               "if L1 and P were on different chromosomes. The REF:ALT columns test each window for segregation bias "
-               "(two-sided binomial against 50:50)."))
-H.append("<h3>rDNA: which arrays are real and large (HiFi read depth)</h3>")
-H.append(P("barrnap finds rRNA gene fragments in many places, but an assembled copy says little about array size: a "
-           "large array collapses to a few copies in the assembly while its reads pile up there. Reads over each array "
-           "against a typical 20 kb window estimate how many copies collapsed into it. Trusted here: a complete 45S "
-           "unit (18S and 28S together), at least 5× the reads of a typical window, or at least 50 assembled 5S genes."))
-H.append(img(FIGS.get("rdna")))
-if Pd.get("rdna_at_join"):
-    H.append(P("At the joins: %s. A collapsed array shows as many times the typical depth; a complete unit at about "
-               "1× is a single copy, not an array." % "; ".join(Pd["rdna_at_join"])))
-for sp, d in D.items():
-    if d.get("rdna_rows"):
-        keep = [r for r in d["rdna_rows"] if r[9] or r[6]]
-        H.append("<p><b>%s</b> (%s): %d arrays, %d trusted; typical 20 kb window %s reads. Trusted arrays and every "
-                 "array within 5 Mb of a join:</p>" % (NAME[sp], d["S"], d["rdna_n_arrays"], d["rdna_n_trust"],
-                                                       ff(d["rdna_base"], 0)))
-        H.append(table(["chromosome", "Mb", "type", "genes", "complete 45S unit", "HiFi reads", "× a typical window",
-                        "trusted", "join nearby"],
-                       [[r[0], r[1], r[2], r[3], "yes" if r[7] else "", fi(r[4]), fi(r[5]), "yes" if r[9] else "",
-                         r[6]] for r in keep[:15]]))
-    elif d.get("rdna_note"):
-        H.append(P("%s: rDNA depth %s" % (NAME[sp], d["rdna_note"])))
-for t, p in (("Hi-C, every library at the joins", os.path.join(A.phd_root, "results/Drosera_paradoxa/qc/hic_remap/library_joins.txt")),
-             ("chr5 against chr6", "qc/linkage/Dparadoxa_std/chr5_chr6_check.txt"),
-             ("rDNA arrays, crossover hotspots and joins", "qc/rdna/rdna_overview.txt"),
-             ("crossover reference C + B against A + D", "qc/linkage/Dparadoxa_CB/cb_check.txt")):
-    H.append(details(t, p))
+run_section('section 7', section_7)
 
 # ---- 8, 9
-H.append("<h2>8. Limitations</h2>")
-ref_line = ("The <i>D. paradoxa</i> reference used here joins chr1 and chr2 the way the tissue does, not the way the "
-            "pollen inherit them; %s crossovers at those joins are an artefact of that choice (section 7)."
-            % fi(Pd.get("join_cos")) if Pd["S"] == "Dparadoxa_std" else
-            "The <i>D. paradoxa</i> reference used here joins chr1 and chr2 the way the pollen inherit them; the tissue "
-            "(Hi-C) shows the other arrangement, unresolved until cytology (section 7).")
-H.append("<ul><li>Markers come from pollen RNA and sit in expressed genes (%s%% and %s%% of good markers inside annotated "
-         "genes); %s%% and %s%% of the chromosome sequence lies in marker gaps over 1 Mb, where crossovers are "
-         "placed only roughly.</li>"
-         "<li><i>D. paradoxa</i> rests on %s nuclei with a median of %s informative molecules, against %s nuclei with "
-         "%s in <i>D. binata</i>.</li>"
-         "<li>Near-identical nuclei (%s pairs in <i>D. binata</i>, %s in <i>D. paradoxa</i>) are still counted "
-         "separately.</li><li>%s</li></ul>"
-         % (ff(100 * B.get("good_in_genes", float("nan")), 0), ff(100 * Pd.get("good_in_genes", float("nan")), 0),
-            ff(100 * B.get("gap_1mb_share", float("nan"))), ff(100 * Pd.get("gap_1mb_share", float("nan"))),
-            fi(len(Pd["cells"])), fi(Pd.get("selected_molecules_median")), fi(len(B["cells"])),
-            fi(B.get("selected_molecules_median")), B.get("dup_pairs", "–"), Pd.get("dup_pairs", "–"), ref_line))
-H.append("<h2>9. Next steps and asks</h2>")
-H.append("<ul><li>%s</li>"
-         "<li>Cytology: meiotic chromosome spreads with oligo-FISH paints for the chr1/chr2 arms, chr5 and chr6, and "
-         "45S rDNA FISH.</li>"
-         "<li>Count near-identical nuclei once, in both species.</li>"
-         "<li>Tune the crossover-calling settings: minor for <i>D. binata</i>; for <i>D. paradoxa</i> on the review panel "
-         "once the reference is settled.</li></ul>"
-         % ("<i>D. paradoxa</i> on the reference joined as the pollen inherit it (chr1_hap2 + chr2_hap1): %s."
-            % ("results in section 7" if os.path.exists("qc/linkage/Dparadoxa_CB/cb_check.txt") else "running")
-            if Pd["S"] == "Dparadoxa_std" else
-            "<i>D. paradoxa</i> crossovers are now called on %s (%s); the comparison with A + D, join by join, is in "
-            "section 7 (crossover reference C + B against A + D)." % (Pd["S"], join_names(Pd["S"])[1])))
+def section_8_9():
+    H.append("<h2>8. Limitations</h2>")
+    lim = ["Markers come from pollen RNA and sit in expressed genes (%s%% and %s%% of good markers inside annotated genes); "
+           "%s%% and %s%% of the chromosome sequence lies in marker gaps over 1 Mb, where crossovers are placed only "
+           "roughly." % (ff(100 * B.get("good_in_genes", float("nan")), 0), ff(100 * Pd.get("good_in_genes", float("nan")), 0),
+                         ff(100 * B.get("gap_1mb_share", float("nan"))), ff(100 * Pd.get("gap_1mb_share", float("nan")))),
+           "<i>D. paradoxa</i> rests on %s nuclei with a median of %s informative molecules, against %s nuclei with %s in "
+           "<i>D. binata</i>." % (fi(len(Pd["cells"])), fi(Pd.get("selected_molecules_median")), fi(len(B["cells"])),
+                                  fi(B.get("selected_molecules_median"))),
+           "Near-identical nuclei are counted separately in the crossover numbers (section 4; <i>D. binata</i> %s, "
+           "<i>D. paradoxa</i> %s)." % (dup_txt(B), dup_txt(Pd))]
+    for sp, d in D.items():
+        if d.get("cut_gaps"):
+            lim.append("<i>%s</i>: a crossover between the last good marker before a cut and the first after it cannot be "
+                       "called: %s." % (NAME[sp], "; ".join("%s at %s Mb, %s kb" % (short(c), ff(x / 1e6, 1),
+                                                                                   fi((b - a) / 1e3))
+                                                           for c, x, a, b in d["cut_gaps"])))
+        if d.get("excl"):
+            lim.append("<i>%s</i>: %s was left out by hand, after the review showed its alleles following another place in "
+                       "the genome (reason in %s). One test applied to every sample should replace the hand-picked list "
+                       "(section 9)." % (NAME[sp], excl_txt(d, dropped=False), d["excl_file"]))
+    lim.append("A nucleus × sequence masked for dosage (section 4) does not count for that sequence: %s in <i>D. binata</i>, "
+               "%s in <i>D. paradoxa</i>." % (fi(len(B.get("masked_pairs", ()))), fi(len(Pd.get("masked_pairs", ())))))
+    lim.append("hapCO's step that narrows a breakpoint does not check the direction of the switch it narrows to, so an "
+               "occasional breakpoint lands on a nearby opposite switch (seen in the <i>D. binata</i> review): it moves "
+               "a crossover, it does not add or remove one.")
+    H.append("<ul>%s</ul>" % "".join("<li>%s</li>" % x for x in lim))
+    H.append("<h2>9. Next steps and asks</h2>")
+    nxt = []
+    if any(d.get("excl") for d in D.values()):
+        nxt.append("Replace the hand-picked exclusion by an automatic filter: per gene cluster, test across nuclei whether "
+                   "its alleles follow its neighbours, and leave out the clusters that follow another place instead; run "
+                   "it with the next <i>D. paradoxa</i> rerun, so both species are called the same way.")
+    for sp, d in D.items():
+        for r in d.get("unexplained", []):
+            nxt.append("<i>%s</i> %s × %s: HiFi reads that span a junction between them, and Hi-C at finer bins near the "
+                       "stretches inherited together; meiotic spreads with paints for both decide."
+                       % (NAME[sp], label(d, r["a"]), label(d, r["b"])))
+    nxt.append("Cytology: meiotic chromosome spreads with oligo-FISH paints for the translocated arms and 45S rDNA FISH.")
+    dup_sp = [sp for sp in D if dup_above_chance(sp)]
+    if dup_sp:
+        nxt.append("Count near-identical nuclei once in the crossover numbers (%s: more pairs than unrelated nuclei give by "
+                   "chance, section 4)." % " and ".join("<i>%s</i>" % NAME[sp] for sp in dup_sp))
+    nxt.append("The places flagged in the decision entries (section 7), with HiFi reads or Hi-C, when the filter above is "
+               "built.")
+    H.append("<ul>%s</ul>" % "".join("<li>%s</li>" % x for x in nxt))
+
+
+run_section('section 8, 9', section_8_9)
 
 # ---- appendix
-H.append("<h2>Appendix</h2><h3>A. Per-chromosome landscapes</h3>")
-H.append(img(FIGS.get("chrom_landscapes")))
-H.append("<h3>B. Crossover-calling parameters as run</h3>")
-for sp, d in D.items():
-    H.append(details("%s: co_calling_params.txt" % NAME[sp], "results/crossovers/%s/co_calling_params.txt" % d["S"]))
-H.append("<h3>C. Files read</h3><pre>%s</pre>" % html.escape("\n".join(sorted(set(map(str, USED))))))
-if MISSING:
-    H.append("<h3>D. Files not found</h3><pre>%s</pre>" % html.escape("\n".join(sorted(set(map(str, MISSING))))))
+def section_appendix():
+    H.append("<h2>Appendix</h2><h3>A. Per-chromosome landscapes</h3>")
+    H.append(img(FIGS.get("chrom_landscapes")))
+    H.append("<h3>B. Per reference sequence</h3>")
+    for sp, d in D.items():
+        if "per_seq" not in d:
+            continue
+        mk = d.get("masks")
+        mm = mk[mk.masked == "yes"] if mk is not None else None
+        rows = []
+        for s in d["seqs"]:
+            cl = mm[mm.chrom == s]["class"].value_counts() if mm is not None else {}
+            rows.append([s, label(d, s), ff(d["Ls"][s] / 1e6, 1), fi(d["nseq_used"][s]),
+                         ", ".join("%s %d" % kv for kv in cl.items()) if len(cl) else "", fi(d["co_seq"][s]),
+                         ff(d["per_seq"][s], 2), ff(100 * d["per_seq"][s] / (d["Ls"][s] / 1e6), 2)])
+        H.append("<p><b>%s</b> (%s)</p>" % (NAME[sp], d["S"]))
+        H.append(table(["sequence", "said as", "Mb", "nuclei that count", "masked (class)", "crossovers",
+                        "per nucleus", "cM/Mb"], rows))
+    H.append("<h3>C. Crossover-calling parameters as run</h3>")
+    for sp, d in D.items():
+        H.append(details("%s: co_calling_params.txt" % NAME[sp], "results/crossovers/%s/co_calling_params.txt" % d["S"]))
+    H.append("<h3>D. Files read</h3><pre>%s</pre>" % html.escape("\n".join(sorted(set(map(str, USED))))))
+    if MISSING:
+        H.append("<h3>E. Files not found</h3><pre>%s</pre>" % html.escape("\n".join(sorted(set(map(str, MISSING))))))
 
+
+run_section('section appendix', section_appendix)
+
+TOP = []
+if WARN:
+    TOP.append("<p class='missing'><b>Checks that failed</b> (the numbers below may not be what the text says): %s</p>"
+               % html.escape("; ".join(WARN)))
+if PROBLEMS:
+    TOP.append("<p class='missing'>Parts that could not be built: %s</p>" % html.escape(
+        "; ".join("%s (%s)" % p for p in PROBLEMS)))
+H[2:2] = TOP
 CSS = """body{font-family:Helvetica,Arial,sans-serif;max-width:1080px;margin:24px auto;padding:0 16px;color:#2C2C2A;
 font-size:13px;line-height:1.45}h1{font-size:21px}h2{font-size:16px;border-bottom:1px solid #D3D1C7;margin-top:30px}
 h3{font-size:13px;margin-top:18px}table{border-collapse:collapse;margin:8px 0 14px;font-size:12px}td,th{border:1px
 solid #D3D1C7;padding:3px 8px;text-align:left;vertical-align:top}th{background:#F1EFE8}table.plain td{border:none}
 .meta{color:#5F5E5A;font-size:11px}.missing{color:#A32D2D}.path{color:#888780;font-size:11px}code{font-size:11px}
-pre{font-size:10.5px;background:#F7F6F2;padding:8px;overflow-x:auto}img{display:block;margin:8px 0}details{margin:4px 0}
-@media print{img{page-break-inside:avoid}table{page-break-inside:avoid}}"""
+pre{font-size:10.5px;background:#F7F6F2;padding:8px;overflow-x:auto;white-space:pre-wrap}img{display:block;margin:8px 0;
+max-width:100%}details{margin:4px 0}@media print{img{page-break-inside:avoid}table{page-break-inside:avoid}}"""
 open(os.path.join(OUT, "report.html"), "w").write(
     "<!doctype html><html><head><meta charset='utf-8'><title>Drosera crossover landscapes</title><style>%s</style>"
     "</head><body>%s</body></html>" % (CSS, "\n".join(H)))
